@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Event store - append-only log of all events from edge
+model Event {
+  id            String   @id @default(uuid()) @db.Uuid
+  eventId       String   @unique @map("event_id")
+  edgeId        String   @map("edge_id")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  type          String
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz
+  receivedAt    DateTime @default(now()) @map("received_at") @db.Timestamptz
+  payload       Json
+
+  @@index([edgeId])
+  @@index([aggregateType, aggregateId])
+  @@index([occurredAt])
+  @@map("events")
+}
+
+/// Read model for cases
+model CaseRead {
+  caseId         String    @id @map("case_id")
+  title          String
+  patientRef     String    @map("patient_ref")
+  status         String    @default("active")
+  createdAt      DateTime  @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @map("updated_at") @db.Timestamptz
+  lastEventId    String?   @map("last_event_id")
+  lastOccurredAt DateTime? @map("last_occurred_at") @db.Timestamptz
+
+  slides SlideRead[]
+
+  @@index([status])
+  @@index([updatedAt])
+  @@map("cases_read")
+}
+
+/// Read model for slides
+model SlideRead {
+  slideId        String    @id @map("slide_id")
+  caseId         String    @map("case_id")
+  svsFilename    String    @map("svs_filename")
+  width          Int
+  height         Int
+  mpp            Float
+  scanner        String?
+  hasPreview     Boolean   @default(false) @map("has_preview")
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  lastEventId    String?   @map("last_event_id")
+  lastOccurredAt DateTime? @map("last_occurred_at") @db.Timestamptz
+
+  case         CaseRead?     @relation(fields: [caseId], references: [caseId], onDelete: Cascade)
+  previewAsset PreviewAsset?
+
+  @@index([caseId])
+  @@index([hasPreview])
+  @@map("slides_read")
+}
+
+/// Preview assets metadata for signed URL generation
+model PreviewAsset {
+  slideId         String   @id @map("slide_id")
+  caseId          String   @map("case_id")
+  wasabiBucket    String   @map("wasabi_bucket")
+  wasabiRegion    String   @map("wasabi_region")
+  wasabiEndpoint  String   @map("wasabi_endpoint")
+  wasabiPrefix    String   @map("wasabi_prefix")
+  thumbKey        String   @map("thumb_key")
+  manifestKey     String   @map("manifest_key")
+  lowTilesPrefix  String   @map("low_tiles_prefix")
+  maxPreviewLevel Int      @map("max_preview_level")
+  tileSize        Int      @map("tile_size")
+  format          String
+  publishedAt     DateTime @default(now()) @map("published_at") @db.Timestamptz
+  lastEventId     String?  @map("last_event_id")
+  lastOccurredAt  DateTime? @map("last_occurred_at") @db.Timestamptz
+
+  slide SlideRead @relation(fields: [slideId], references: [slideId], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("preview_assets")
+}
