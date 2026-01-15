@@ -1,4 +1,5 @@
-import Fastify from 'fastify';
+import 'dotenv/config';
+import Fastify, { FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import config from '../config/index.js';
@@ -38,7 +39,7 @@ async function buildServer() {
   await fastify.register(readRoutes);
 
   // Global error handler
-  fastify.setErrorHandler((error, request, reply) => {
+  fastify.setErrorHandler((error: FastifyError, request, reply) => {
     request.log.error({ error }, 'Unhandled error');
 
     // Don't expose internal errors in production

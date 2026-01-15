@@ -3,9 +3,9 @@ import {
   isValidKey,
   validateTileKeyAgainstPrefix,
   extractSlideIdFromKey,
-} from '../src/modules/wasabi/wasabiSigner.js';
+} from '../src/modules/wasabi/validation.js';
 
-describe('wasabiSigner', () => {
+describe('wasabiSigner validation', () => {
   describe('isValidKey', () => {
     it('should accept valid keys', () => {
       expect(isValidKey('previews/slide-123/thumb.jpg')).toBe(true);
