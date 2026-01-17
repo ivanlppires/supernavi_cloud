@@ -230,6 +230,88 @@ export async function readRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(500).send({ error: 'Failed to sign URL' });
     }
   });
+
+  /**
+   * GET /api/v1/tiles/proxy
+   * Redirects to a presigned URL for tile access.
+   * This allows OpenSeadragon to use a stable URL that redirects to Wasabi.
+   */
+  fastify.get('/api/v1/tiles/proxy', async (
+    request: FastifyRequest<{ Querystring: { key?: string; expires_seconds?: string } }>,
+    reply: FastifyReply
+  ) => {
+    const { key, expires_seconds } = request.query;
+
+    // Validate key is provided
+    if (!key || typeof key !== 'string') {
+      return reply.status(400).send({ error: 'Missing required query parameter: key' });
+    }
+
+    // Security: Validate key format to prevent path traversal
+    // Must start with "previews/", contain "/tiles/", end with valid extension, no ".."
+    const validExtensions = /\.(jpg|jpeg|png)$/i;
+    if (!key.startsWith('previews/')) {
+      return reply.status(400).send({ error: 'Invalid key: must start with "previews/"' });
+    }
+    if (!key.includes('/tiles/')) {
+      return reply.status(400).send({ error: 'Invalid key: must contain "/tiles/"' });
+    }
+    if (!validExtensions.test(key)) {
+      return reply.status(400).send({ error: 'Invalid key: must end with .jpg, .jpeg, or .png' });
+    }
+    if (key.includes('..')) {
+      return reply.status(400).send({ error: 'Invalid key: path traversal not allowed' });
+    }
+
+    // Parse expires_seconds (default 300)
+    const expiresSeconds = expires_seconds ? parseInt(expires_seconds, 10) : 300;
+    if (isNaN(expiresSeconds) || expiresSeconds < 60 || expiresSeconds > 3600) {
+      return reply.status(400).send({ error: 'expires_seconds must be between 60 and 3600' });
+    }
+
+    // Extract slide_id from key
+    const slideId = extractSlideIdFromKey(key);
+    if (!slideId) {
+      return reply.status(403).send({ error: 'Invalid key format - cannot determine slide_id' });
+    }
+
+    try {
+      // Verify that we have a preview for this slide
+      const previewAsset = await prisma.previewAsset.findUnique({
+        where: { slideId },
+      });
+
+      if (!previewAsset) {
+        return reply.status(403).send({ error: 'No preview found for this slide' });
+      }
+
+      // Validate the key is within the allowed prefix
+      const allowedPrefixes = [
+        previewAsset.wasabiPrefix,
+        previewAsset.lowTilesPrefix,
+        previewAsset.thumbKey.substring(0, previewAsset.thumbKey.lastIndexOf('/')),
+      ];
+
+      const isAllowed = allowedPrefixes.some((prefix) => key.startsWith(prefix));
+
+      if (!isAllowed) {
+        return reply.status(403).send({ error: 'Key is not within allowed preview prefix' });
+      }
+
+      // Generate presigned URL
+      const presignedUrl = await getSignedUrlForKey(
+        key,
+        expiresSeconds,
+        previewAsset.wasabiBucket
+      );
+
+      // Redirect to the presigned URL
+      return reply.status(302).redirect(presignedUrl);
+    } catch (err) {
+      request.log.error({ error: err, key }, 'Failed to generate presigned URL for proxy');
+      return reply.status(500).send({ error: 'Failed to generate presigned URL' });
+    }
+  });
 }
 
 export default readRoutes;

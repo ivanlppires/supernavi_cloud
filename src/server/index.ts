@@ -1,12 +1,18 @@
 import 'dotenv/config';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import Fastify, { FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
 import config from '../config/index.js';
 import { connectDatabase, disconnectDatabase } from '../db/index.js';
 import { healthRoutes } from './health.js';
 import { syncRoutes } from '../sync/routes.js';
 import { readRoutes } from '../modules/read/routes.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 async function buildServer() {
   const fastify = Fastify({
@@ -25,12 +31,43 @@ async function buildServer() {
     origin: false, // Disable CORS by default
   });
 
-  // Rate limiting
+  // Serve static files from public folder (for preview viewer)
+  await fastify.register(fastifyStatic, {
+    root: join(__dirname, '../../public'),
+    prefix: '/preview/',
+    decorateReply: false, // Avoid conflicts if other static plugins used
+  });
+
+  // Redirect /preview to /preview/preview.html
+  fastify.get('/preview', async (_request, reply) => {
+    return reply.redirect('/preview/preview.html');
+  });
+
+  // Rate limiting with route-specific limits
   await fastify.register(rateLimit, {
-    max: 100, // Max 100 requests per minute per IP
+    max: 100, // Default: 100 requests per minute per IP
     timeWindow: '1 minute',
-    // Higher limit for sync endpoint since edge may batch events
     keyGenerator: (request) => request.ip,
+    // Skip rate limiting for tile endpoints (handled by route-specific config)
+    allowList: (request) => {
+      // Higher limit for tile endpoints (viewer needs many tiles)
+      const url = request.url.split('?')[0]; // Remove query string
+      return url === '/api/v1/tiles/sign' || url === '/api/v1/tiles/proxy';
+    },
+  });
+
+  // Separate higher rate limit for tile endpoints
+  await fastify.register(rateLimit, {
+    max: 1000, // 1000 requests per minute for tiles
+    timeWindow: '1 minute',
+    keyGenerator: (request) => request.ip,
+    onExceeding: () => {},
+    onExceeded: () => {},
+    // Only apply to tile endpoints
+    allowList: (request) => {
+      const url = request.url.split('?')[0];
+      return url !== '/api/v1/tiles/sign' && url !== '/api/v1/tiles/proxy';
+    },
   });
 
   // Register routes

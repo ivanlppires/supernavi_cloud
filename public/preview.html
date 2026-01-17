@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SuperNavi Preview Viewer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    h1 { margin: 0 0 20px; font-size: 24px; color: #4cc9f0; }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .controls label { font-size: 14px; color: #aaa; }
+    .controls input {
+      padding: 10px 14px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #16213e;
+      color: #eee;
+      font-size: 14px;
+      width: 300px;
+    }
+    .controls input:focus { outline: none; border-color: #4cc9f0; }
+    .controls button {
+      padding: 10px 24px;
+      background: #4cc9f0;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .controls button:hover { background: #7bdff2; }
+    .controls button:disabled { background: #333; color: #666; cursor: not-allowed; }
+    .viewer-container {
+      display: flex;
+      gap: 20px;
+      height: calc(100vh - 160px);
+    }
+    .viewer-wrapper {
+      flex: 1;
+      position: relative;
+    }
+    #viewer {
+      width: 100%;
+      height: 100%;
+      background: #0f0f1a;
+      border-radius: 8px;
+      border: 1px solid #333;
+    }
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.7);
+      color: #888;
+      font-size: 16px;
+      border-radius: 8px;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .loading-overlay.hidden { display: none; }
+    .sidebar {
+      width: 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+    .panel {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 16px;
+      border: 1px solid #333;
+    }
+    .panel h3 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      color: #4cc9f0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 13px;
+      border-bottom: 1px solid #333;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-row .label { color: #888; }
+    .info-row .value { color: #eee; font-family: monospace; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .stat {
+      background: #0f0f1a;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .stat .number { font-size: 20px; font-weight: bold; color: #4cc9f0; }
+    .stat .label { font-size: 11px; color: #888; margin-top: 4px; }
+    #log {
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .log-entry { padding: 3px 0; border-bottom: 1px solid #222; }
+    .log-entry.error { color: #f87171; }
+    .log-entry.success { color: #4ade80; }
+    .log-entry.info { color: #60a5fa; }
+    .log-entry .time { color: #666; margin-right: 6px; }
+    .thumbnail { margin-top: 12px; }
+    .thumbnail img { max-width: 100%; border-radius: 4px; border: 1px solid #333; }
+    .error-box {
+      background: #7f1d1d;
+      border: 1px solid #f87171;
+      color: #fecaca;
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>SuperNavi Preview Viewer</h1>
+
+    <div class="controls">
+      <label for="slideId">Slide ID:</label>
+      <input type="text" id="slideId" placeholder="Enter slide UUID..." />
+      <button id="loadBtn" onclick="loadSlide()">Load</button>
+    </div>
+
+    <div class="viewer-container">
+      <!-- Wrapper para manter o overlay separado do viewer OSD -->
+      <div class="viewer-wrapper">
+        <div id="viewer"></div>
+        <div class="loading-overlay" id="viewerOverlay">Enter a Slide ID and click Load</div>
+      </div>
+
+      <div class="sidebar">
+        <div class="panel" id="errorPanel" style="display: none;">
+          <div class="error-box" id="errorBox"></div>
+        </div>
+
+        <div class="panel">
+          <h3>Viewport Debug</h3>
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="number" id="statZoom">-</div>
+              <div class="label">Zoom</div>
+            </div>
+            <div class="stat">
+              <div class="number" id="statLevel">-</div>
+              <div class="label">Level</div>
+            </div>
+            <div class="stat">
+              <div class="number" id="statSigned">0</div>
+              <div class="label">Tiles Signed</div>
+            </div>
+            <div class="stat">
+              <div class="number" id="statCached">0</div>
+              <div class="label">Cache Hits</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Manifest Info</h3>
+          <div id="manifestInfo">
+            <div class="info-row">
+              <span class="label">Status</span>
+              <span class="value">Not loaded</span>
+            </div>
+          </div>
+          <div class="thumbnail" id="thumbnail" style="display: none;">
+            <img id="thumbImg" alt="Thumbnail" />
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Activity Log</h3>
+          <div id="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // GLOBALS
+    // ============================================================
+    let viewer = null;
+    let previewData = null;
+    let manifestData = null;
+    let currentSlideId = '';  // Store slideId for absolute key construction
+    let tileFormat = 'jpg';
+
+    // Stats
+    let stats = { requests: 0 };
+
+    // ============================================================
+    // SAFE DOM ACCESS HELPERS
+    // ============================================================
+    function safeGetElement(id) {
+      const el = document.getElementById(id);
+      if (!el) {
+        console.warn(`[WARN] Missing element: ${id}`);
+      }
+      return el;
+    }
+
+    function safeSetText(id, text) {
+      const el = safeGetElement(id);
+      if (el) el.textContent = text;
+    }
+
+    function safeSetHTML(id, html) {
+      const el = safeGetElement(id);
+      if (el) el.innerHTML = html;
+    }
+
+    function safeSetDisplay(id, display) {
+      const el = safeGetElement(id);
+      if (el) el.style.display = display;
+    }
+
+    function safeSetSrc(id, src) {
+      const el = safeGetElement(id);
+      if (el) el.src = src;
+    }
+
+    function safeAddClass(id, className) {
+      const el = safeGetElement(id);
+      if (el) el.classList.add(className);
+    }
+
+    function safeRemoveClass(id, className) {
+      const el = safeGetElement(id);
+      if (el) el.classList.remove(className);
+    }
+
+    // ============================================================
+    // LOGGING
+    // ============================================================
+    function log(message, type = 'info') {
+      console.log(`[${type.toUpperCase()}] ${message}`);
+      const logEl = safeGetElement('log');
+      if (!logEl) return;
+
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      const time = new Date().toLocaleTimeString();
+      entry.innerHTML = `<span class="time">${time}</span>${message}`;
+      logEl.insertBefore(entry, logEl.firstChild);
+
+      while (logEl.children.length > 100) {
+        logEl.removeChild(logEl.lastChild);
+      }
+    }
+
+    function showError(message) {
+      safeSetDisplay('errorPanel', 'block');
+      safeSetText('errorBox', message);
+      log(message, 'error');
+    }
+
+    function hideError() {
+      safeSetDisplay('errorPanel', 'none');
+    }
+
+    function showOverlay(message) {
+      safeSetText('viewerOverlay', message);
+      safeRemoveClass('viewerOverlay', 'hidden');
+    }
+
+    function hideOverlay() {
+      safeAddClass('viewerOverlay', 'hidden');
+    }
+
+    function updateStats() {
+      safeSetText('statSigned', stats.requests.toString());
+      safeSetText('statCached', '-');
+    }
+
+    function updateManifestInfo(info) {
+      const html = Object.entries(info).map(([key, value]) => `
+        <div class="info-row">
+          <span class="label">${key}</span>
+          <span class="value">${value}</span>
+        </div>
+      `).join('');
+      safeSetHTML('manifestInfo', html);
+    }
+
+    // ============================================================
+    // TILE URL GENERATION (using proxy endpoint)
+    // ============================================================
+
+    /**
+     * Build the S3 key for a tile
+     * Format: previews/<slideId>/tiles/<level>/<x>_<y>.<format>
+     */
+    function getTileKey(level, x, y) {
+      return `previews/${currentSlideId}/tiles/${level}/${x}_${y}.${tileFormat}`;
+    }
+
+    /**
+     * Get the proxy URL for a tile.
+     * The proxy endpoint will redirect (302) to the presigned Wasabi URL.
+     * This allows OSD to use a stable URL without async signing.
+     */
+    function getTileUrl(level, x, y) {
+      stats.requests++;
+      updateStats();
+
+      const key = getTileKey(level, x, y);
+      const proxyUrl = `/api/v1/tiles/proxy?key=${encodeURIComponent(key)}`;
+
+      // Log first few requests for debugging
+      if (stats.requests <= 5) {
+        console.log(`[TILE] level=${level}, x=${x}, y=${y} -> ${proxyUrl}`);
+        log(`Tile: ${level}/${x}_${y}.${tileFormat}`, 'info');
+      }
+
+      return proxyUrl;
+    }
+
+    // ============================================================
+    // VIEWPORT DEBUG UPDATE
+    // ============================================================
+    function updateViewportDebug() {
+      if (!viewer || !viewer.viewport) return;
+
+      try {
+        const zoom = viewer.viewport.getZoom();
+        safeSetText('statZoom', zoom.toFixed(3));
+
+        // Calculate current level based on zoom
+        const item = viewer.world.getItemAt(0);
+        if (manifestData && item) {
+          const imageSize = item.getContentSize();
+          const containerSize = viewer.viewport.getContainerSize();
+          const tileSize = manifestData.tileSize || 256;
+          const maxLevel = manifestData.levelMax || 0;
+
+          if (imageSize && containerSize) {
+            const viewportWidth = containerSize.x;
+            const imageWidth = imageSize.x;
+            const pixelRatio = zoom * viewportWidth / imageWidth;
+            const level = Math.max(0, Math.min(maxLevel,
+              Math.ceil(Math.log2(pixelRatio * imageWidth / tileSize))
+            ));
+            safeSetText('statLevel', level.toString());
+          }
+        }
+      } catch (err) {
+        console.warn('[WARN] updateViewportDebug error:', err.message);
+      }
+    }
+
+    // ============================================================
+    // LOAD SLIDE
+    // ============================================================
+    async function loadSlide() {
+      const slideInput = safeGetElement('slideId');
+      if (!slideInput) {
+        console.error('[ERROR] slideId input not found');
+        return;
+      }
+
+      const slideId = slideInput.value.trim();
+      if (!slideId) {
+        showError('Please enter a Slide ID');
+        return;
+      }
+
+      const btn = safeGetElement('loadBtn');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Loading...';
+      }
+      hideError();
+
+      // Reset state
+      stats = { requests: 0 };
+      updateStats();
+      safeSetHTML('log', '');
+      showOverlay('Loading...');
+
+      // Destroy existing viewer
+      if (viewer) {
+        viewer.destroy();
+        viewer = null;
+        window.viewer = null;
+      }
+
+      try {
+        // 1. Fetch preview info
+        log(`Fetching preview for: ${slideId}`);
+        const previewResponse = await fetch(`/api/v1/slides/${slideId}/preview`);
+        if (!previewResponse.ok) {
+          const err = await previewResponse.json();
+          throw new Error(err.error || 'Failed to load preview');
+        }
+        previewData = await previewResponse.json();
+        log('Preview info loaded', 'success');
+
+        // Store slideId for absolute key construction
+        currentSlideId = previewData.slide_id;
+        log(`Using slideId: ${currentSlideId}`);
+
+        // Show thumbnail
+        safeSetSrc('thumbImg', previewData.thumb_url);
+        safeSetDisplay('thumbnail', 'block');
+
+        // 2. Fetch manifest
+        log('Fetching manifest...');
+        const manifestResponse = await fetch(previewData.manifest_url);
+        if (!manifestResponse.ok) {
+          throw new Error('Failed to fetch manifest');
+        }
+        manifestData = await manifestResponse.json();
+        log('Manifest loaded', 'success');
+
+        // 3. VALIDATE MANIFEST - required fields
+        const requiredFields = ['width', 'height', 'tileSize', 'levelMax', 'tilePathPattern'];
+        const missingFields = requiredFields.filter(f => manifestData[f] === undefined);
+
+        if (missingFields.length > 0) {
+          throw new Error(`Invalid manifest: missing fields: ${missingFields.join(', ')}. Cannot open as DZI pyramid.`);
+        }
+
+        // Set tile format from manifest
+        tileFormat = manifestData.format || 'jpg';
+
+        // Extract format from tilePathPattern if present
+        if (manifestData.tilePathPattern) {
+          const formatMatch = manifestData.tilePathPattern.match(/\.(\w+)$/);
+          if (formatMatch) {
+            tileFormat = formatMatch[1];
+          }
+        }
+
+        log(`Using proxy endpoint for tiles`);
+        log(`Tile format: ${tileFormat}`);
+
+        // Update info panel
+        updateManifestInfo({
+          'Width': manifestData.width + ' px',
+          'Height': manifestData.height + ' px',
+          'Tile Size': manifestData.tileSize + ' px',
+          'Levels': `0 - ${manifestData.levelMax}`,
+          'Format': tileFormat,
+          'Tile Path': `previews/${currentSlideId}/tiles/`
+        });
+
+        log(`Pyramid: ${manifestData.width}x${manifestData.height}, levels 0-${manifestData.levelMax}`);
+
+        // 4. Initialize viewer with DZI pyramid
+        await initViewer();
+
+        hideOverlay();
+        log('Viewer initialized', 'success');
+        console.log('[SUCCESS] UI updated');
+
+      } catch (err) {
+        showError(err.message);
+        showOverlay('Error: ' + err.message);
+        console.error('[ERROR] loadSlide failed:', err);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Load';
+        }
+        console.log('[SUCCESS] loadSlide completed');
+      }
+    }
+
+    // ============================================================
+    // INIT VIEWER
+    // ============================================================
+    async function initViewer() {
+      const width = manifestData.width;
+      const height = manifestData.height;
+      const tileSize = manifestData.tileSize;
+      const maxLevel = manifestData.levelMax;
+
+      log(`Creating tile source: ${width}x${height}, tileSize=${tileSize}, maxLevel=${maxLevel}`);
+
+      // Create custom tile source
+      const tileSource = {
+        width: width,
+        height: height,
+        tileSize: tileSize,
+        tileOverlap: 0,
+        minLevel: 0,
+        maxLevel: maxLevel,
+
+        getLevelScale: function(level) {
+          return Math.pow(2, level - maxLevel);
+        },
+
+        getNumTiles: function(level) {
+          const scale = this.getLevelScale(level);
+          const w = Math.ceil(width * scale);
+          const h = Math.ceil(height * scale);
+          return new OpenSeadragon.Point(
+            Math.ceil(w / tileSize),
+            Math.ceil(h / tileSize)
+          );
+        },
+
+        getTileWidth: function(level) { return tileSize; },
+        getTileHeight: function(level) { return tileSize; },
+
+        // Returns proxy URL that redirects to presigned Wasabi URL
+        getTileUrl: function(level, x, y) {
+          return getTileUrl(level, x, y);
+        },
+
+        tileExists: function(level, x, y) {
+          const numTiles = this.getNumTiles(level);
+          return level >= 0 && level <= maxLevel &&
+                 x >= 0 && x < numTiles.x &&
+                 y >= 0 && y < numTiles.y;
+        }
+      };
+
+      // Create viewer
+      viewer = OpenSeadragon({
+        id: 'viewer',
+        prefixUrl: 'https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/images/',
+        tileSources: tileSource,
+        showNavigator: true,
+        navigatorPosition: 'BOTTOM_RIGHT',
+        showZoomControl: true,
+        showHomeControl: true,
+        showFullPageControl: true,
+        animationTime: 0.3,
+        blendTime: 0.1,
+        constrainDuringPan: true,
+        maxZoomPixelRatio: 2,
+        visibilityRatio: 0.5,
+        minZoomImageRatio: 0.8,
+        defaultZoomLevel: 0,
+        immediateRender: false,
+        imageLoaderLimit: 8,
+        // CORS: Required for loading tiles from Wasabi (cross-origin)
+        crossOriginPolicy: 'Anonymous',
+        ajaxWithCredentials: false
+      });
+
+      // Expose globally for debugging
+      window.viewer = viewer;
+      log('window.viewer exposed for debugging');
+
+      // Update viewport debug on animation
+      viewer.addHandler('animation', updateViewportDebug);
+      viewer.addHandler('animation-finish', updateViewportDebug);
+      viewer.addHandler('zoom', updateViewportDebug);
+
+      // Event handlers
+      viewer.addHandler('open', function() {
+        log('Tile source opened', 'success');
+        updateViewportDebug();
+      });
+
+      viewer.addHandler('open-failed', function(event) {
+        showError('Failed to open tile source: ' + (event.message || 'Unknown error'));
+      });
+
+      viewer.addHandler('tile-load-failed', function(event) {
+        const tile = event.tile;
+        // Only log if it's not a placeholder failure
+        if (tile.url && !tile.url.startsWith('data:')) {
+          log(`Tile failed: L${tile.level} (${tile.x},${tile.y})`, 'error');
+        }
+      });
+
+      // Wait for open
+      return new Promise((resolve, reject) => {
+        viewer.addOnceHandler('open', resolve);
+        viewer.addOnceHandler('open-failed', (e) => reject(new Error(e.message)));
+      });
+    }
+
+    // ============================================================
+    // INIT
+    // ============================================================
+    const slideInput = safeGetElement('slideId');
+    if (slideInput) {
+      slideInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') loadSlide();
+      });
+    }
+
+    log('Viewer ready. Enter a Slide ID to begin.');
+
+    // Periodic viewport update
+    setInterval(updateViewportDebug, 500);
+  </script>
+</body>
+</html>
