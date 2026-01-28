@@ -88,3 +88,43 @@ model PreviewAsset {
   @@index([caseId])
   @@map("preview_assets")
 }
+
+/// Users for authentication
+model User {
+  id             String    @id @default(uuid()) @db.Uuid
+  email          String    @unique
+  name           String
+  role           String    @default("pathologist")
+  avatarUrl      String?   @map("avatar_url")
+  crm            String?
+  specialization String?
+  googleId       String?   @unique @map("google_id")
+  appleId        String?   @unique @map("apple_id")
+  passwordHash   String?   @map("password_hash")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz
+
+  settings UserSettings?
+
+  @@index([email])
+  @@map("users")
+}
+
+/// User settings
+model UserSettings {
+  userId              String  @id @map("user_id") @db.Uuid
+  theme               String  @default("light")
+  language            String  @default("pt-BR")
+  defaultZoom         Int     @default(1) @map("default_zoom")
+  showNavigator       Boolean @default(true) @map("show_navigator")
+  showScale           Boolean @default(true) @map("show_scale")
+  autoRotate          Boolean @default(false) @map("auto_rotate")
+  annotationColor     String  @default("#FF0000") @map("annotation_color")
+  notificationsEmail  Boolean @default(true) @map("notifications_email")
+  notificationsBrowser Boolean @default(true) @map("notifications_browser")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}

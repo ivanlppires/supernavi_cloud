@@ -18,6 +18,21 @@ const envSchema = z.object({
 
   // Signed URL settings
   SIGNED_URL_TTL_SECONDS: z.coerce.number().default(120),
+
+  // Edge Tunnel Authentication
+  // Token that edge agents must provide to connect
+  EDGE_TUNNEL_TOKEN: z.string().optional(),
+
+  // Edge Tunnel Timeouts (milliseconds)
+  EDGE_TUNNEL_HEALTH_TIMEOUT_MS: z.coerce.number().default(2000),
+  EDGE_TUNNEL_TILE_TIMEOUT_MS: z.coerce.number().default(8000),
+
+  // JWT Authentication
+  JWT_SECRET: z.string().default('dev-jwt-secret-change-in-production'),
+  JWT_EXPIRES_IN: z.string().default('7d'),
+
+  // Google OAuth
+  GOOGLE_CLIENT_ID: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

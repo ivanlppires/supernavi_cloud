@@ -5,11 +5,15 @@ import Fastify, { FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import websocket from '@fastify/websocket';
 import config from '../config/index.js';
 import { connectDatabase, disconnectDatabase } from '../db/index.js';
 import { healthRoutes } from './health.js';
 import { syncRoutes } from '../sync/routes.js';
 import { readRoutes } from '../modules/read/routes.js';
+import { edgeRoutes } from '../modules/edge/routes.js';
+import { previewRoutes } from '../modules/preview/routes.js';
+import { authRoutes } from '../modules/auth/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,10 +30,25 @@ async function buildServer() {
     bodyLimit: 10 * 1024 * 1024,
   });
 
-  // CORS - disabled/restricted by default for API
+  // CORS - enabled for same-origin frontend
   await fastify.register(cors, {
-    origin: false, // Disable CORS by default
+    origin: true, // Allow all origins (same-origin in production, dev needs CORS)
+    credentials: true,
   });
+
+  // Content type parser for binary uploads (SVS, TIFF, etc.)
+  fastify.addContentTypeParser('*', function (request, payload, done) {
+    // For upload endpoints, just pass through the raw stream
+    if (request.url.startsWith('/api/upload-stub/')) {
+      done(null, payload);
+    } else {
+      // For other endpoints, let default parser handle it
+      done(null, undefined);
+    }
+  });
+
+  // WebSocket support for edge tunnel
+  await fastify.register(websocket);
 
   // Serve static files from public folder (for preview viewer)
   await fastify.register(fastifyStatic, {
@@ -74,6 +93,9 @@ async function buildServer() {
   await fastify.register(healthRoutes);
   await fastify.register(syncRoutes);
   await fastify.register(readRoutes);
+  await fastify.register(edgeRoutes);
+  await fastify.register(previewRoutes);
+  await fastify.register(authRoutes);
 
   // Global error handler
   fastify.setErrorHandler((error: FastifyError, request, reply) => {
