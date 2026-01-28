@@ -27,6 +27,7 @@ npm run db:studio              # Open Prisma Studio
 # Testing
 npm run test                   # Run all tests
 npm run test:watch             # Watch mode
+npm run test -- schemas        # Run single test file (by name filter)
 
 # Build
 npm run build                  # Compile TypeScript
@@ -46,8 +47,9 @@ src/
 ├── server/         # Fastify server setup and health routes
 ├── sync/           # Event ingestion (schemas, eventStore, projections, routes)
 └── modules/
-    ├── read/       # Read API (cases, slides, preview endpoints)
+    ├── read/       # Read API (cases, slides, preview, tile proxy endpoints)
     └── wasabi/     # S3 signed URL generation
+tests/              # Test files (vitest, mirrors src/ structure)
 ```
 
 ### Data Flow
