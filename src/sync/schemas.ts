@@ -59,19 +59,29 @@ export const slideRegisteredPayloadSchema = z.object({
 
 export type SlideRegisteredPayload = z.infer<typeof slideRegisteredPayloadSchema>;
 
-export const previewPublishedPayloadSchema = z.object({
-  slide_id: z.string().min(1),
-  case_id: z.string().min(1),
-  wasabi_bucket: z.string().min(1),
-  wasabi_region: z.string().min(1),
-  wasabi_endpoint: z.string().url(),
-  wasabi_prefix: z.string().min(1),
-  thumb_key: z.string().min(1),
-  manifest_key: z.string().min(1),
-  low_tiles_prefix: z.string().min(1),
-  max_preview_level: z.number().int().nonnegative(),
-  tile_size: z.number().int().positive(),
-  format: z.string().min(1),
-});
+export const previewPublishedPayloadSchema = z
+  .object({
+    slide_id: z.string().min(1),
+    case_id: z.string().min(1),
+    wasabi_bucket: z.string().min(1),
+    wasabi_region: z.string().min(1),
+    wasabi_endpoint: z.string().url(),
+    wasabi_prefix: z.string().min(1),
+    thumb_key: z.string().min(1),
+    manifest_key: z.string().min(1),
+    // Accept both tiles_prefix (new) and low_tiles_prefix (legacy)
+    tiles_prefix: z.string().min(1).optional(),
+    low_tiles_prefix: z.string().min(1).optional(),
+    max_preview_level: z.number().int().nonnegative(),
+    tile_size: z.number().int().positive(),
+    format: z.string().min(1),
+  })
+  .refine(
+    (data) => data.tiles_prefix !== undefined || data.low_tiles_prefix !== undefined,
+    {
+      message: 'Either tiles_prefix or low_tiles_prefix must be provided',
+      path: ['tiles_prefix'],
+    }
+  );
 
 export type PreviewPublishedPayload = z.infer<typeof previewPublishedPayloadSchema>;

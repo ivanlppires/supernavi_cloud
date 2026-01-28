@@ -11,6 +11,19 @@ export interface ProjectionResult {
   error?: string;
 }
 
+export type Logger = {
+  info: (obj: object, msg?: string) => void;
+  warn?: (obj: object, msg?: string) => void;
+  error: (obj: object, msg?: string) => void;
+};
+
+/**
+ * Ensures a path ends with a trailing slash
+ */
+function ensureTrailingSlash(path: string): string {
+  return path.endsWith('/') ? path : `${path}/`;
+}
+
 /**
  * Projects a CaseUpserted event to cases_read table
  */
@@ -104,7 +117,8 @@ async function projectSlideRegistered(
  */
 async function projectPreviewPublished(
   tx: Prisma.TransactionClient,
-  event: EventInput
+  event: EventInput,
+  logger?: Logger
 ): Promise<ProjectionResult> {
   const parseResult = previewPublishedPayloadSchema.safeParse(event.payload);
   if (!parseResult.success) {
@@ -115,6 +129,32 @@ async function projectPreviewPublished(
   }
 
   const payload = parseResult.data;
+
+  // Determine tiles prefix: prefer tiles_prefix (new) over low_tiles_prefix (legacy)
+  // Schema validation ensures at least one is present
+  const usedField = payload.tiles_prefix ? 'tiles_prefix' : 'low_tiles_prefix';
+  const rawTilesPrefix = payload.tiles_prefix ?? payload.low_tiles_prefix;
+
+  // This should never happen due to schema validation, but TypeScript needs the check
+  if (!rawTilesPrefix) {
+    return {
+      success: false,
+      error: 'PreviewPublished payload missing both tiles_prefix and low_tiles_prefix',
+    };
+  }
+
+  // Normalize to ensure trailing slash
+  const tilesPrefix = ensureTrailingSlash(rawTilesPrefix);
+
+  logger?.info({
+    event_id: event.event_id,
+    slide_id: payload.slide_id,
+    used_field: usedField,
+    tiles_prefix: tilesPrefix,
+    wasabi_endpoint: payload.wasabi_endpoint,
+    wasabi_region: payload.wasabi_region,
+    wasabi_bucket: payload.wasabi_bucket,
+  }, `PreviewPublished: using ${usedField} for tiles prefix`);
 
   // Ensure the slide exists (create minimal record if not)
   const existingSlide = await tx.slideRead.findUnique({
@@ -148,7 +188,7 @@ async function projectPreviewPublished(
     });
   }
 
-  // Upsert preview asset
+  // Upsert preview asset with normalized tiles prefix
   await tx.previewAsset.upsert({
     where: { slideId: payload.slide_id },
     create: {
@@ -160,7 +200,7 @@ async function projectPreviewPublished(
       wasabiPrefix: payload.wasabi_prefix,
       thumbKey: payload.thumb_key,
       manifestKey: payload.manifest_key,
-      lowTilesPrefix: payload.low_tiles_prefix,
+      lowTilesPrefix: tilesPrefix,
       maxPreviewLevel: payload.max_preview_level,
       tileSize: payload.tile_size,
       format: payload.format,
@@ -176,7 +216,7 @@ async function projectPreviewPublished(
       wasabiPrefix: payload.wasabi_prefix,
       thumbKey: payload.thumb_key,
       manifestKey: payload.manifest_key,
-      lowTilesPrefix: payload.low_tiles_prefix,
+      lowTilesPrefix: tilesPrefix,
       maxPreviewLevel: payload.max_preview_level,
       tileSize: payload.tile_size,
       format: payload.format,
@@ -194,7 +234,8 @@ async function projectPreviewPublished(
  */
 export async function projectEvent(
   tx: Prisma.TransactionClient,
-  event: EventInput
+  event: EventInput,
+  logger?: Logger
 ): Promise<ProjectionResult> {
   switch (event.type) {
     case 'CaseUpserted':
@@ -202,7 +243,7 @@ export async function projectEvent(
     case 'SlideRegistered':
       return projectSlideRegistered(tx, event);
     case 'PreviewPublished':
-      return projectPreviewPublished(tx, event);
+      return projectPreviewPublished(tx, event, logger);
     default:
       // Unknown event types are accepted but not projected
       return { success: true };

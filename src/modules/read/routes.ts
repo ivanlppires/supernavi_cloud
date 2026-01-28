@@ -132,17 +132,24 @@ export async function readRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Preview not found for this slide' });
       }
 
-      // Generate signed URLs for thumb and manifest
+      // Generate signed URLs for thumb and manifest using previewAsset's endpoint/region
+      const clientConfig = {
+        endpoint: previewAsset.wasabiEndpoint,
+        region: previewAsset.wasabiRegion,
+      };
+
       const [thumbUrl, manifestUrl] = await Promise.all([
         getSignedUrlForKey(
           previewAsset.thumbKey,
           config.SIGNED_URL_TTL_SECONDS,
-          previewAsset.wasabiBucket
+          previewAsset.wasabiBucket,
+          clientConfig
         ),
         getSignedUrlForKey(
           previewAsset.manifestKey,
           config.SIGNED_URL_TTL_SECONDS,
-          previewAsset.wasabiBucket
+          previewAsset.wasabiBucket,
+          clientConfig
         ),
       ]);
 
@@ -217,11 +224,26 @@ export async function readRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
+      // Use previewAsset's endpoint/region for signing
+      const clientConfig = {
+        endpoint: previewAsset.wasabiEndpoint,
+        region: previewAsset.wasabiRegion,
+      };
+
       const url = await getSignedUrlForKey(
         key,
         expires_seconds,
-        previewAsset.wasabiBucket
+        previewAsset.wasabiBucket,
+        clientConfig
       );
+
+      request.log.info({
+        slide_id: slideId,
+        key,
+        endpoint: previewAsset.wasabiEndpoint,
+        region: previewAsset.wasabiRegion,
+        bucket: previewAsset.wasabiBucket,
+      }, 'Signed tile URL');
 
       const response: TileSignResponse = { url };
       return reply.send(response);
@@ -253,8 +275,9 @@ export async function readRoutes(fastify: FastifyInstance): Promise<void> {
     if (!key.startsWith('previews/')) {
       return reply.status(400).send({ error: 'Invalid key: must start with "previews/"' });
     }
-    if (!key.includes('/tiles/')) {
-      return reply.status(400).send({ error: 'Invalid key: must contain "/tiles/"' });
+    // Support both /tiles/ (legacy) and /preview_tiles/ (rebased preview)
+    if (!key.includes('/tiles/') && !key.includes('/preview_tiles/')) {
+      return reply.status(400).send({ error: 'Invalid key: must contain "/tiles/" or "/preview_tiles/"' });
     }
     if (!validExtensions.test(key)) {
       return reply.status(400).send({ error: 'Invalid key: must end with .jpg, .jpeg, or .png' });
@@ -298,11 +321,18 @@ export async function readRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(403).send({ error: 'Key is not within allowed preview prefix' });
       }
 
+      // Use previewAsset's endpoint/region for signing
+      const clientConfig = {
+        endpoint: previewAsset.wasabiEndpoint,
+        region: previewAsset.wasabiRegion,
+      };
+
       // Generate presigned URL
       const presignedUrl = await getSignedUrlForKey(
         key,
         expiresSeconds,
-        previewAsset.wasabiBucket
+        previewAsset.wasabiBucket,
+        clientConfig
       );
 
       // Redirect to the presigned URL

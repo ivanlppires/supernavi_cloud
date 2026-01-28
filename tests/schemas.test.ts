@@ -186,44 +186,98 @@ describe('Sync Schemas', () => {
   });
 
   describe('previewPublishedPayloadSchema', () => {
-    it('should validate a valid PreviewPublished payload', () => {
+    const basePayload = {
+      slide_id: 'slide-123',
+      case_id: 'case-123',
+      wasabi_bucket: 'supernavi',
+      wasabi_region: 'us-east-1',
+      wasabi_endpoint: 'https://s3.us-east-1.wasabisys.com',
+      wasabi_prefix: 'previews/slide-123/',
+      thumb_key: 'previews/slide-123/thumb.jpg',
+      manifest_key: 'previews/slide-123/manifest.json',
+      max_preview_level: 6,
+      tile_size: 256,
+      format: 'jpg',
+    };
+
+    it('should validate payload with low_tiles_prefix only (legacy)', () => {
       const payload = {
-        slide_id: 'slide-123',
-        case_id: 'case-123',
-        wasabi_bucket: 'supernavi',
-        wasabi_region: 'us-east-1',
-        wasabi_endpoint: 'https://s3.us-east-1.wasabisys.com',
-        wasabi_prefix: 'previews/slide-123/',
-        thumb_key: 'previews/slide-123/thumb.jpg',
-        manifest_key: 'previews/slide-123/manifest.json',
+        ...basePayload,
         low_tiles_prefix: 'previews/slide-123/tiles/',
-        max_preview_level: 6,
-        tile_size: 256,
-        format: 'jpg',
       };
 
       const result = previewPublishedPayloadSchema.safeParse(payload);
       expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.low_tiles_prefix).toBe('previews/slide-123/tiles/');
+        expect(result.data.tiles_prefix).toBeUndefined();
+      }
     });
 
-    it('should reject invalid wasabi_endpoint URL', () => {
+    it('should validate payload with tiles_prefix only (new)', () => {
       const payload = {
-        slide_id: 'slide-123',
-        case_id: 'case-123',
-        wasabi_bucket: 'supernavi',
-        wasabi_region: 'us-east-1',
-        wasabi_endpoint: 'not-a-url',
-        wasabi_prefix: 'previews/slide-123/',
-        thumb_key: 'previews/slide-123/thumb.jpg',
-        manifest_key: 'previews/slide-123/manifest.json',
-        low_tiles_prefix: 'previews/slide-123/tiles/',
-        max_preview_level: 6,
-        tile_size: 256,
-        format: 'jpg',
+        ...basePayload,
+        tiles_prefix: 'previews/slide-123/tiles/',
+      };
+
+      const result = previewPublishedPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.tiles_prefix).toBe('previews/slide-123/tiles/');
+        expect(result.data.low_tiles_prefix).toBeUndefined();
+      }
+    });
+
+    it('should validate payload with both tiles_prefix and low_tiles_prefix', () => {
+      const payload = {
+        ...basePayload,
+        tiles_prefix: 'previews/slide-123/tiles/',
+        low_tiles_prefix: 'previews/slide-123/old_tiles/',
+      };
+
+      const result = previewPublishedPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.tiles_prefix).toBe('previews/slide-123/tiles/');
+        expect(result.data.low_tiles_prefix).toBe('previews/slide-123/old_tiles/');
+      }
+    });
+
+    it('should reject payload with neither tiles_prefix nor low_tiles_prefix', () => {
+      const payload = {
+        ...basePayload,
+        // Neither tiles_prefix nor low_tiles_prefix
       };
 
       const result = previewPublishedPayloadSchema.safeParse(payload);
       expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0].message).toContain('tiles_prefix or low_tiles_prefix');
+      }
+    });
+
+    it('should reject invalid wasabi_endpoint URL', () => {
+      const payload = {
+        ...basePayload,
+        wasabi_endpoint: 'not-a-url',
+        low_tiles_prefix: 'previews/slide-123/tiles/',
+      };
+
+      const result = previewPublishedPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(false);
+    });
+
+    it('should validate payload with eu-central-1 region', () => {
+      const payload = {
+        ...basePayload,
+        wasabi_region: 'eu-central-1',
+        wasabi_endpoint: 'https://s3.eu-central-1.wasabisys.com',
+        wasabi_bucket: 'supernavi-eu',
+        tiles_prefix: 'previews/slide-123/tiles/',
+      };
+
+      const result = previewPublishedPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(true);
     });
   });
 });

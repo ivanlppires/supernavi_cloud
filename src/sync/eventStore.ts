@@ -103,7 +103,7 @@ export async function ingestEvents(
     // Project each event
     for (const event of newEvents) {
       try {
-        const projectionResult = await projectEvent(tx, event);
+        const projectionResult = await projectEvent(tx, event, logger);
         if (projectionResult.success) {
           result.accepted.push(event.event_id);
         } else {
