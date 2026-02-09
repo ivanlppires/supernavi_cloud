@@ -49,12 +49,16 @@ export type CaseUpsertedPayload = z.infer<typeof caseUpsertedPayloadSchema>;
 
 export const slideRegisteredPayloadSchema = z.object({
   slide_id: z.string().min(1),
-  case_id: z.string().min(1),
+  case_id: z.string().min(1).nullable().optional(),
   svs_filename: z.string(),
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
-  mpp: z.number().positive(),
+  width: z.number().int().nonnegative(),
+  height: z.number().int().nonnegative(),
+  mpp: z.number().nonnegative(),
   scanner: z.string().optional(),
+  // PathoWeb integration fields
+  external_case_id: z.string().optional().nullable(),
+  external_case_base: z.string().optional().nullable(),
+  external_slide_label: z.string().optional().nullable(),
 });
 
 export type SlideRegisteredPayload = z.infer<typeof slideRegisteredPayloadSchema>;
@@ -62,7 +66,7 @@ export type SlideRegisteredPayload = z.infer<typeof slideRegisteredPayloadSchema
 export const previewPublishedPayloadSchema = z
   .object({
     slide_id: z.string().min(1),
-    case_id: z.string().min(1),
+    case_id: z.string().min(1).nullable().optional(),
     wasabi_bucket: z.string().min(1),
     wasabi_region: z.string().min(1),
     wasabi_endpoint: z.string().url(),

@@ -183,6 +183,76 @@ describe('Sync Schemas', () => {
       const result = slideRegisteredPayloadSchema.safeParse(payload);
       expect(result.success).toBe(false);
     });
+
+    it('should accept nullable case_id (PathoWeb edge events)', () => {
+      const payload = {
+        slide_id: 'slide-123',
+        case_id: null,
+        svs_filename: 'AP26000230A2.svs',
+        width: 100000,
+        height: 80000,
+        mpp: 0.25,
+      };
+
+      const result = slideRegisteredPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.case_id).toBeNull();
+      }
+    });
+
+    it('should accept zero width/height/mpp (initial registration)', () => {
+      const payload = {
+        slide_id: 'slide-123',
+        case_id: null,
+        svs_filename: 'AP26000230.svs',
+        width: 0,
+        height: 0,
+        mpp: 0,
+      };
+
+      const result = slideRegisteredPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+    });
+
+    it('should accept optional external case fields', () => {
+      const payload = {
+        slide_id: 'slide-123',
+        case_id: null,
+        svs_filename: 'AP26000230A2.svs',
+        width: 100000,
+        height: 80000,
+        mpp: 0.25,
+        external_case_id: 'pathoweb:AP26000230',
+        external_case_base: 'AP26000230',
+        external_slide_label: 'A2',
+      };
+
+      const result = slideRegisteredPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.external_case_id).toBe('pathoweb:AP26000230');
+        expect(result.data.external_case_base).toBe('AP26000230');
+        expect(result.data.external_slide_label).toBe('A2');
+      }
+    });
+
+    it('should accept payload without external fields (backward compat)', () => {
+      const payload = {
+        slide_id: 'slide-123',
+        case_id: 'case-123',
+        svs_filename: 'sample.svs',
+        width: 100000,
+        height: 80000,
+        mpp: 0.25,
+      };
+
+      const result = slideRegisteredPayloadSchema.safeParse(payload);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.external_case_id).toBeUndefined();
+      }
+    });
   });
 
   describe('previewPublishedPayloadSchema', () => {

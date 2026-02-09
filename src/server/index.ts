@@ -14,6 +14,8 @@ import { readRoutes } from '../modules/read/routes.js';
 import { edgeRoutes } from '../modules/edge/routes.js';
 import { previewRoutes } from '../modules/preview/routes.js';
 import { authRoutes } from '../modules/auth/routes.js';
+import { annotationRoutes } from '../modules/annotations/routes.js';
+import { uiBridgeRoutes } from '../modules/ui-bridge/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -67,25 +69,30 @@ async function buildServer() {
     max: 100, // Default: 100 requests per minute per IP
     timeWindow: '1 minute',
     keyGenerator: (request) => request.ip,
-    // Skip rate limiting for tile endpoints (handled by route-specific config)
+    // Skip rate limiting for high-throughput endpoints (handled by route-specific config)
     allowList: (request) => {
-      // Higher limit for tile endpoints (viewer needs many tiles)
       const url = request.url.split('?')[0]; // Remove query string
-      return url === '/api/v1/tiles/sign' || url === '/api/v1/tiles/proxy';
+      // Skip rate limiting for tile endpoints and edge tunnel (viewer needs many tiles)
+      return url === '/api/v1/tiles/sign' ||
+             url === '/api/v1/tiles/proxy' ||
+             url.startsWith('/edge/');
     },
   });
 
-  // Separate higher rate limit for tile endpoints
+  // Separate higher rate limit for tile and edge endpoints
   await fastify.register(rateLimit, {
-    max: 1000, // 1000 requests per minute for tiles
+    max: 2000, // 2000 requests per minute for tiles/edge
     timeWindow: '1 minute',
     keyGenerator: (request) => request.ip,
     onExceeding: () => {},
     onExceeded: () => {},
-    // Only apply to tile endpoints
+    // Only apply to tile and edge endpoints
     allowList: (request) => {
       const url = request.url.split('?')[0];
-      return url !== '/api/v1/tiles/sign' && url !== '/api/v1/tiles/proxy';
+      const isHighThroughput = url === '/api/v1/tiles/sign' ||
+                               url === '/api/v1/tiles/proxy' ||
+                               url.startsWith('/edge/');
+      return !isHighThroughput;
     },
   });
 
@@ -96,6 +103,8 @@ async function buildServer() {
   await fastify.register(edgeRoutes);
   await fastify.register(previewRoutes);
   await fastify.register(authRoutes);
+  await fastify.register(annotationRoutes);
+  await fastify.register(uiBridgeRoutes);
 
   // Global error handler
   fastify.setErrorHandler((error: FastifyError, request, reply) => {

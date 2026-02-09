@@ -87,23 +87,31 @@ async function projectSlideRegistered(
     where: { slideId: payload.slide_id },
     create: {
       slideId: payload.slide_id,
-      caseId: payload.case_id,
+      caseId: payload.case_id ?? 'unlinked',
       svsFilename: payload.svs_filename,
       width: payload.width,
       height: payload.height,
-      mpp: payload.mpp,
+      mpp: payload.mpp || 0.25,
       scanner: payload.scanner ?? null,
       hasPreview: false,
+      externalCaseId: payload.external_case_id ?? null,
+      externalCaseBase: payload.external_case_base ?? null,
+      externalSlideLabel: payload.external_slide_label ?? null,
+      confirmedCaseLink: !!payload.external_case_id,
       lastEventId: event.event_id,
       lastOccurredAt: new Date(event.occurred_at),
     },
     update: {
-      caseId: payload.case_id,
+      ...(payload.case_id && { caseId: payload.case_id }),
       svsFilename: payload.svs_filename,
-      width: payload.width,
-      height: payload.height,
-      mpp: payload.mpp,
+      ...(payload.width > 0 && { width: payload.width }),
+      ...(payload.height > 0 && { height: payload.height }),
+      ...(payload.mpp > 0 && { mpp: payload.mpp }),
       scanner: payload.scanner ?? null,
+      ...(payload.external_case_id !== undefined && { externalCaseId: payload.external_case_id }),
+      ...(payload.external_case_base !== undefined && { externalCaseBase: payload.external_case_base }),
+      ...(payload.external_slide_label !== undefined && { externalSlideLabel: payload.external_slide_label }),
+      ...(payload.external_case_id && { confirmedCaseLink: true }),
       lastEventId: event.event_id,
       lastOccurredAt: new Date(event.occurred_at),
     },
@@ -156,44 +164,70 @@ async function projectPreviewPublished(
     wasabi_bucket: payload.wasabi_bucket,
   }, `PreviewPublished: using ${usedField} for tiles prefix`);
 
-  // Ensure the slide exists (create minimal record if not)
-  const existingSlide = await tx.slideRead.findUnique({
+  // Try to find existing slide by ID first
+  let existingSlide = await tx.slideRead.findUnique({
     where: { slideId: payload.slide_id },
   });
 
+  // If not found by Edge ID, try to find by filename (for slides created via frontend)
+  // The filename in the event payload can be extracted from thumb_key or manifest_key
   if (!existingSlide) {
-    // Create a minimal slide record - the full data should come from SlideRegistered
-    await tx.slideRead.create({
-      data: {
-        slideId: payload.slide_id,
-        caseId: payload.case_id,
-        svsFilename: 'unknown', // Will be updated by SlideRegistered event
-        width: 0,
-        height: 0,
-        mpp: 0,
-        hasPreview: true,
-        lastEventId: event.event_id,
-        lastOccurredAt: new Date(event.occurred_at),
+    // Try to extract filename from thumb_key (format: previews/{slideId}/thumb.jpg)
+    // Or check for slides with matching case_id that don't have preview yet
+    const slidesWithoutPreview = await tx.slideRead.findMany({
+      where: {
+        hasPreview: false,
+        ...(payload.case_id ? { caseId: payload.case_id } : {}),
       },
+      take: 10,
     });
-  } else {
-    // Update slide to mark it has preview
-    await tx.slideRead.update({
-      where: { slideId: payload.slide_id },
-      data: {
-        hasPreview: true,
-        lastEventId: event.event_id,
-        lastOccurredAt: new Date(event.occurred_at),
-      },
-    });
+
+    // If there's only one slide without preview for this case, assume it's the match
+    if (slidesWithoutPreview.length === 1) {
+      existingSlide = slidesWithoutPreview[0];
+      logger?.info({
+        event_id: event.event_id,
+        edge_slide_id: payload.slide_id,
+        matched_slide_id: existingSlide.slideId,
+        case_id: payload.case_id,
+      }, 'Matched PreviewPublished to existing slide by case');
+    }
   }
+
+  if (!existingSlide) {
+    // No matching slide found - skip creating new slide and preview asset
+    // This can happen when preview events arrive before slide registration
+    // or for slides that were created in Edge but not synced to Cloud
+    logger?.warn?.({
+      event_id: event.event_id,
+      edge_slide_id: payload.slide_id,
+      case_id: payload.case_id,
+    }, 'PreviewPublished: no matching slide found, skipping');
+    return { success: true };
+  }
+
+  // Determine the case_id to use: from payload or existing slide
+  const caseId = payload.case_id ?? existingSlide.caseId;
+
+  // Update slide to mark it has preview
+  await tx.slideRead.update({
+    where: { slideId: existingSlide.slideId },
+    data: {
+      hasPreview: true,
+      lastEventId: event.event_id,
+      lastOccurredAt: new Date(event.occurred_at),
+    },
+  });
+
+  // Use the actual slide ID for preview asset
+  const actualSlideId = existingSlide.slideId;
 
   // Upsert preview asset with normalized tiles prefix
   await tx.previewAsset.upsert({
-    where: { slideId: payload.slide_id },
+    where: { slideId: actualSlideId },
     create: {
-      slideId: payload.slide_id,
-      caseId: payload.case_id,
+      slideId: actualSlideId,
+      caseId,
       wasabiBucket: payload.wasabi_bucket,
       wasabiRegion: payload.wasabi_region,
       wasabiEndpoint: payload.wasabi_endpoint,
@@ -209,7 +243,7 @@ async function projectPreviewPublished(
       lastOccurredAt: new Date(event.occurred_at),
     },
     update: {
-      caseId: payload.case_id,
+      caseId,
       wasabiBucket: payload.wasabi_bucket,
       wasabiRegion: payload.wasabi_region,
       wasabiEndpoint: payload.wasabi_endpoint,

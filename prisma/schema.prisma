@@ -30,38 +30,69 @@ model CaseRead {
   caseId         String    @id @map("case_id")
   title          String
   patientRef     String    @map("patient_ref")
+  patientAge     Int?      @map("patient_age")
+  patientSex     String?   @map("patient_sex")
   status         String    @default("active")
+  ownerId        String?   @map("owner_id") @db.Uuid
   createdAt      DateTime  @map("created_at") @db.Timestamptz
   updatedAt      DateTime  @map("updated_at") @db.Timestamptz
   lastEventId    String?   @map("last_event_id")
   lastOccurredAt DateTime? @map("last_occurred_at") @db.Timestamptz
 
-  slides SlideRead[]
+  slides        SlideRead[]
+  collaborators CaseCollaborator[]
 
   @@index([status])
   @@index([updatedAt])
+  @@index([ownerId])
   @@map("cases_read")
+}
+
+/// Case collaborators - users invited to collaborate on a case
+model CaseCollaborator {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @map("case_id")
+  userId    String   @map("user_id") @db.Uuid
+  role      String   @default("collaborator") // viewer, collaborator
+  invitedBy String?  @map("invited_by") @db.Uuid
+  invitedAt DateTime @default(now()) @map("invited_at") @db.Timestamptz
+  status    String   @default("pending") // pending, accepted, declined
+
+  case CaseRead @relation(fields: [caseId], references: [caseId], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, userId])
+  @@index([userId])
+  @@index([status])
+  @@map("case_collaborators")
 }
 
 /// Read model for slides
 model SlideRead {
-  slideId        String    @id @map("slide_id")
-  caseId         String    @map("case_id")
-  svsFilename    String    @map("svs_filename")
-  width          Int
-  height         Int
-  mpp            Float
-  scanner        String?
-  hasPreview     Boolean   @default(false) @map("has_preview")
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-  lastEventId    String?   @map("last_event_id")
-  lastOccurredAt DateTime? @map("last_occurred_at") @db.Timestamptz
+  slideId            String    @id @map("slide_id")
+  caseId             String    @map("case_id")
+  svsFilename        String    @map("svs_filename")
+  width              Int
+  height             Int
+  mpp                Float
+  scanner            String?
+  hasPreview         Boolean   @default(false) @map("has_preview")
+  externalCaseId     String?   @map("external_case_id")
+  externalCaseBase   String?   @map("external_case_base")
+  externalSlideLabel String?   @map("external_slide_label")
+  confirmedCaseLink  Boolean   @default(true) @map("confirmed_case_link")
+  readyForReviewAt   DateTime? @map("ready_for_review_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  lastEventId        String?   @map("last_event_id")
+  lastOccurredAt     DateTime? @map("last_occurred_at") @db.Timestamptz
 
   case         CaseRead?     @relation(fields: [caseId], references: [caseId], onDelete: Cascade)
   previewAsset PreviewAsset?
 
   @@index([caseId])
   @@index([hasPreview])
+  @@index([externalCaseId])
+  @@index([externalCaseBase])
   @@map("slides_read")
 }
 
@@ -105,7 +136,8 @@ model User {
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz
 
-  settings UserSettings?
+  settings       UserSettings?
+  collaborations CaseCollaborator[]
 
   @@index([email])
   @@map("users")
@@ -127,4 +159,63 @@ model UserSettings {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+/// Read model for annotations (ROIs)
+model AnnotationRead {
+  id          Int      @id @default(autoincrement())
+  slideId     String   @map("slide_id")
+  name        String
+  color       String   @default("#FF0000")
+  type        String   @default("rectangle") // rectangle, arrow, freehand
+  coordinates Json     // { x, y, width, height, points? }
+  status      String   @default("open") // open, pending_review, resolved
+  priority    String   @default("normal") // low, normal, high, urgent
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  messages    MessageRead[]
+
+  @@index([slideId])
+  @@index([createdBy])
+  @@index([status])
+  @@map("annotations_read")
+}
+
+/// Viewer audit log for PathoWeb integration tracking
+model ViewerAuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  slideId        String   @map("slide_id")
+  externalCaseId String?  @map("external_case_id")
+  action         String   // viewer_opened, magic_link_created, case_attached
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([slideId])
+  @@index([externalCaseId])
+  @@index([createdAt])
+  @@map("viewer_audit_log")
+}
+
+/// Messages in annotation discussion threads
+model MessageRead {
+  id           String   @id @default(uuid()) @db.Uuid
+  annotationId Int      @map("annotation_id")
+  authorId     String   @map("author_id") @db.Uuid
+  content      String
+  type         String   @default("text") // text, system, ai_analysis, ai_suggestion
+  aiConfidence Float?   @map("ai_confidence")
+  aiFindings   Json?    @map("ai_findings") // Array of { label, value, severity? }
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  annotation   AnnotationRead @relation(fields: [annotationId], references: [id], onDelete: Cascade)
+
+  @@index([annotationId])
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("messages_read")
 }

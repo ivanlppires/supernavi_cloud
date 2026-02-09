@@ -33,6 +33,20 @@ const envSchema = z.object({
 
   // Google OAuth
   GOOGLE_CLIENT_ID: z.string().optional(),
+
+  // UI-Bridge (Chrome Extension) Authentication
+  UI_BRIDGE_API_KEY: z.string().optional(),
+
+  // Magic Link JWT
+  MAGIC_LINK_SECRET: z.string().optional(),
+  MAGIC_LINK_TTL_SECONDS: z.coerce.number().default(300),
+
+  // Thumb signing (HMAC) - defaults to MAGIC_LINK_SECRET at runtime
+  THUMB_SIGN_SECRET: z.string().optional(),
+  THUMB_SIGN_TTL_SECONDS: z.coerce.number().default(600),
+
+  // Frontend URL for magic links
+  FRONTEND_URL: z.string().default('http://localhost:3002'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

@@ -200,8 +200,10 @@ export async function previewRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Construct the tile key
-      // Tiles are stored as: previews/<slideId>/preview_tiles/<level>/<x>_<y>.jpg
-      const tileKey = `${previewAsset.lowTilesPrefix}/${level}/${file}`;
+      // Tiles are stored as: previews/<slideId>/tiles/<level>/<x>_<y>.jpg
+      // lowTilesPrefix may or may not end with /, so normalize it
+      const prefix = previewAsset.lowTilesPrefix.replace(/\/+$/, '');
+      const tileKey = `${prefix}/${level}/${file}`;
 
       const client = getS3Client(previewAsset.wasabiEndpoint, previewAsset.wasabiRegion);
       const command = new GetObjectCommand({
