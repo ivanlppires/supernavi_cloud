@@ -87,7 +87,7 @@ async function projectSlideRegistered(
     where: { slideId: payload.slide_id },
     create: {
       slideId: payload.slide_id,
-      caseId: payload.case_id ?? 'unlinked',
+      caseId: payload.case_id ?? null,
       svsFilename: payload.svs_filename,
       width: payload.width,
       height: payload.height,

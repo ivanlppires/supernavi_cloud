@@ -32,6 +32,7 @@ model CaseRead {
   patientRef     String    @map("patient_ref")
   patientAge     Int?      @map("patient_age")
   patientSex     String?   @map("patient_sex")
+  doctor         String?
   status         String    @default("active")
   ownerId        String?   @map("owner_id") @db.Uuid
   createdAt      DateTime  @map("created_at") @db.Timestamptz
@@ -70,7 +71,7 @@ model CaseCollaborator {
 /// Read model for slides
 model SlideRead {
   slideId            String    @id @map("slide_id")
-  caseId             String    @map("case_id")
+  caseId             String?   @map("case_id")
   svsFilename        String    @map("svs_filename")
   width              Int
   height             Int
@@ -99,7 +100,7 @@ model SlideRead {
 /// Preview assets metadata for signed URL generation
 model PreviewAsset {
   slideId         String   @id @map("slide_id")
-  caseId          String   @map("case_id")
+  caseId          String?  @map("case_id")
   wasabiBucket    String   @map("wasabi_bucket")
   wasabiRegion    String   @map("wasabi_region")
   wasabiEndpoint  String   @map("wasabi_endpoint")
@@ -198,6 +199,34 @@ model ViewerAuditLog {
   @@index([externalCaseId])
   @@index([createdAt])
   @@map("viewer_audit_log")
+}
+
+/// Extension devices paired via short-code flow
+model ExtensionDevice {
+  id         String    @id @default(uuid()) @db.Uuid
+  clinicId   String    @map("clinic_id") @db.Uuid
+  name       String
+  tokenHash  String    @map("token_hash")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
+  lastSeenAt DateTime? @map("last_seen_at") @db.Timestamptz
+
+  @@index([clinicId])
+  @@index([tokenHash])
+  @@map("extension_devices")
+}
+
+/// Short-lived pairing codes for device registration
+model PairingCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  code      String    @unique
+  clinicId  String    @map("clinic_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+  deviceId  String?   @map("device_id") @db.Uuid
+
+  @@index([code])
+  @@map("pairing_codes")
 }
 
 /// Messages in annotation discussion threads

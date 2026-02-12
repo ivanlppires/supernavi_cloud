@@ -215,6 +215,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         patientName: c.title,
         patientAge: c.patientAge,
         patientSex: c.patientSex as 'M' | 'F' | null,
+        doctor: c.doctor || null,
         status,
         location,
         ownerId: c.ownerId || '',
@@ -247,6 +248,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           processingError: null,
           uploadedAt: s.updatedAt.toISOString(),
           processedAt: s.hasPreview ? s.updatedAt.toISOString() : null,
+          externalCaseBase: s.externalCaseBase || null,
         })),
       };
     });
@@ -330,11 +332,12 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         id: caseData.caseId,
         caseNumber: caseData.patientRef,
         patientName: caseData.title,
-        patientAge: null,
-        patientSex: null,
+        patientAge: caseData.patientAge,
+        patientSex: caseData.patientSex as 'M' | 'F' | null,
+        doctor: caseData.doctor || null,
         status: caseData.status === 'active' ? 'novo' : caseData.status,
         location: caseData.status === 'archived' ? 'archived' : caseData.status === 'deleted' ? 'trash' : 'inbox',
-        ownerId: '', // Not tracked in cloud DB
+        ownerId: caseData.ownerId || '',
         description: null,
         clinicalNotes: null,
         createdAt: caseData.createdAt.toISOString(),
@@ -357,6 +360,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           processingError: null,
           uploadedAt: s.updatedAt.toISOString(),
           processedAt: s.hasPreview ? s.updatedAt.toISOString() : null,
+          externalCaseBase: s.externalCaseBase || null,
         })),
       });
     } catch (error) {
@@ -456,6 +460,43 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     return reply.send(result);
   });
 
+  // Get slides by externalCaseBase (for edge slides without a cloud caseId)
+  fastify.get<{
+    Params: { caseBase: string };
+  }>('/api/slides/by-case-base/:caseBase', {
+    preHandler: authenticate,
+  }, async (request, reply) => {
+    const caseBase = request.params.caseBase.toUpperCase();
+
+    const slides = await prisma.slideRead.findMany({
+      where: { externalCaseBase: caseBase, confirmedCaseLink: true },
+      include: { previewAsset: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const result = slides.map(s => ({
+      id: s.slideId,
+      caseId: s.caseId || '',
+      name: s.svsFilename.replace(/\.[^/.]+$/, ''),
+      originalFilename: s.svsFilename,
+      fileFormat: s.svsFilename.split('.').pop()?.toLowerCase() || 'svs',
+      fileSize: '0',
+      storagePath: null,
+      dziPath: s.previewAsset ? `slides/${s.slideId}/${s.slideId}.dzi` : null,
+      thumbnailUrl: s.previewAsset ? `/preview/${s.slideId}/thumb.jpg` : null,
+      mpp: s.mpp?.toString() || null,
+      width: s.width,
+      height: s.height,
+      processingStatus: s.hasPreview ? 'ready' : 'processing',
+      processingError: null,
+      uploadedAt: s.updatedAt.toISOString(),
+      processedAt: s.hasPreview ? s.updatedAt.toISOString() : null,
+      externalCaseBase: s.externalCaseBase || null,
+    }));
+
+    return reply.send(result);
+  });
+
   // Add slide to a case
   fastify.post<{
     Params: { caseId: string };
@@ -499,6 +540,82 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       name: originalFilename.replace(/\.[^/.]+$/, ''),
       originalFilename,
       processingStatus: 'processing',
+    });
+  });
+
+  // Get single slide (supports both normal auth and magic link tokens)
+  fastify.get<{
+    Params: { slideId: string };
+  }>('/api/slides/:slideId', async (request, reply) => {
+    const { slideId } = request.params;
+
+    // Try to authenticate: normal JWT or magic link JWT
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.status(401).send({ error: 'Missing authorization header' });
+    }
+
+    const token = authHeader.slice(7);
+    const secret = config.MAGIC_LINK_SECRET || config.JWT_SECRET;
+    let payload: any;
+    try {
+      payload = jwt.verify(token, secret);
+    } catch {
+      // Try fallback with JWT_SECRET if MAGIC_LINK_SECRET is set and different
+      if (config.MAGIC_LINK_SECRET && config.MAGIC_LINK_SECRET !== config.JWT_SECRET) {
+        try {
+          payload = jwt.verify(token, config.JWT_SECRET);
+        } catch {
+          return reply.status(401).send({ error: 'Invalid or expired token' });
+        }
+      } else {
+        return reply.status(401).send({ error: 'Invalid or expired token' });
+      }
+    }
+
+    // If magic link, verify the slideId matches
+    if (payload.sub === 'magic-link' && payload.purpose === 'viewer') {
+      if (payload.slideId !== slideId) {
+        return reply.status(403).send({ error: 'Token not valid for this slide' });
+      }
+    } else if (payload.sub) {
+      // Normal user token — verify user exists
+      const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+      if (!user) {
+        return reply.status(401).send({ error: 'User not found' });
+      }
+    } else {
+      return reply.status(401).send({ error: 'Invalid token' });
+    }
+
+    const slide = await prisma.slideRead.findUnique({
+      where: { slideId },
+      include: { previewAsset: true },
+    });
+
+    if (!slide) {
+      return reply.status(404).send({ error: 'Slide not found' });
+    }
+
+    // Map to the Slide shape the frontend expects
+    return reply.send({
+      id: slide.slideId,
+      caseId: slide.caseId || '',
+      name: slide.svsFilename.replace(/\.[^/.]+$/, ''),
+      originalFilename: slide.svsFilename,
+      fileFormat: slide.svsFilename.split('.').pop()?.toLowerCase() || 'svs',
+      fileSize: '0',
+      storagePath: null,
+      dziPath: slide.previewAsset ? `slides/${slide.slideId}/${slide.slideId}.dzi` : null,
+      thumbnailUrl: slide.previewAsset ? `/preview/${slide.slideId}/thumb.jpg` : null,
+      mpp: slide.mpp?.toString() || null,
+      width: slide.width,
+      height: slide.height,
+      processingStatus: slide.hasPreview ? 'ready' : 'processing',
+      processingError: null,
+      uploadedAt: slide.updatedAt.toISOString(),
+      processedAt: slide.hasPreview ? slide.updatedAt.toISOString() : null,
+      externalCaseBase: slide.externalCaseBase || null,
     });
   });
 

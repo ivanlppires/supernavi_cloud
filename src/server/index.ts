@@ -16,6 +16,7 @@ import { previewRoutes } from '../modules/preview/routes.js';
 import { authRoutes } from '../modules/auth/routes.js';
 import { annotationRoutes } from '../modules/annotations/routes.js';
 import { uiBridgeRoutes } from '../modules/ui-bridge/routes.js';
+import { pairingRoutes } from '../modules/pairing/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -105,6 +106,7 @@ async function buildServer() {
   await fastify.register(authRoutes);
   await fastify.register(annotationRoutes);
   await fastify.register(uiBridgeRoutes);
+  await fastify.register(pairingRoutes);
 
   // Global error handler
   fastify.setErrorHandler((error: FastifyError, request, reply) => {
