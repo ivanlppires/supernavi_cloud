@@ -47,6 +47,9 @@ const envSchema = z.object({
 
   // Frontend URL for magic links
   FRONTEND_URL: z.string().default('http://localhost:3002'),
+
+  // CORS allowed origins (comma-separated)
+  ALLOWED_ORIGINS: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

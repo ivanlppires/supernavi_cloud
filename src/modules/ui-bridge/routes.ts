@@ -1,10 +1,18 @@
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createHash } from 'crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { prisma } from '../../db/index.js';
 import config from '../../config/index.js';
 import { getSignedUrlForKey } from '../wasabi/wasabiSigner.js';
 import { calculateMatchScore } from './matching.js';
+import {
+  normalizeCaseBase,
+  toExternalCaseId,
+  signThumbUrl,
+  verifyThumbSignature,
+  findOrCreateCase,
+  linkSiblingSlides,
+} from './helpers.js';
 
 // ============================================================================
 // Helpers
@@ -49,52 +57,18 @@ async function authenticateApiKey(
   return reply.status(401).send({ error: 'Invalid or missing API key' });
 }
 
-/**
- * Normalize case input.
- * Accepts "AP26000230", "pathoweb:AP26000230", or "pathoweb:ap26000230".
- * Returns raw caseBase (e.g. "AP26000230").
- */
-function normalizeCaseBase(input: string): string {
-  return input.replace(/^pathoweb:/i, '').toUpperCase();
-}
-
-/**
- * Build the full externalCaseId from a caseBase.
- */
-function toExternalCaseId(caseBase: string): string {
-  return `pathoweb:${caseBase}`;
-}
-
-// ---- Signed thumb URLs (HMAC, no auth headers needed for <img>) ----------
+// ---- Config-bound wrappers for helpers that need secrets -------------------
 
 function getThumbSecret(): string {
   return config.THUMB_SIGN_SECRET || config.MAGIC_LINK_SECRET || config.JWT_SECRET;
 }
 
-/**
- * Sign a thumb URL: /api/ui-bridge/thumb/:slideId?exp=EPOCH&sig=HEX
- */
-function signThumbUrl(slideId: string, ttlSeconds?: number): string {
-  const ttl = ttlSeconds ?? config.THUMB_SIGN_TTL_SECONDS;
-  const exp = Math.floor(Date.now() / 1000) + ttl;
-  const data = `${slideId}:${exp}`;
-  const sig = createHmac('sha256', getThumbSecret()).update(data).digest('hex');
-  return `/api/ui-bridge/thumb/${slideId}?exp=${exp}&sig=${sig}`;
+function signThumb(slideId: string): string {
+  return signThumbUrl(slideId, getThumbSecret(), config.THUMB_SIGN_TTL_SECONDS);
 }
 
-/**
- * Verify exp+sig on a thumb request. Returns true if valid.
- */
-function verifyThumbSignature(slideId: string, exp: string, sig: string): boolean {
-  const expNum = parseInt(exp, 10);
-  if (!expNum || expNum < Math.floor(Date.now() / 1000)) return false; // expired
-  const data = `${slideId}:${expNum}`;
-  const expected = createHmac('sha256', getThumbSecret()).update(data).digest('hex');
-  try {
-    return timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
-  } catch {
-    return false;
-  }
+function verifyThumb(slideId: string, exp: string, sig: string): boolean {
+  return verifyThumbSignature(slideId, exp, sig, getThumbSecret());
 }
 
 // ============================================================================
@@ -134,7 +108,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       .map(s => ({
         slideId: s.slideId,
         label: s.externalSlideLabel || '1',
-        thumbUrl: signThumbUrl(s.slideId),
+        thumbUrl: signThumb(s.slideId),
         width: s.width,
         height: s.height,
       }));
@@ -169,7 +143,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         return {
           slideId: s.slideId,
           label: s.externalSlideLabel || s.svsFilename,
-          thumbUrl: s.hasPreview ? signThumbUrl(s.slideId) : null,
+          thumbUrl: s.hasPreview ? signThumb(s.slideId) : null,
           score,
           filename: s.svsFilename,
           createdAt: s.updatedAt.toISOString(),
@@ -228,7 +202,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         return {
           slideId: s.slideId,
           label: s.externalSlideLabel || s.svsFilename,
-          thumbUrl: s.hasPreview ? signThumbUrl(s.slideId) : null,
+          thumbUrl: s.hasPreview ? signThumb(s.slideId) : null,
           score,
           filename: s.svsFilename,
           createdAt: s.updatedAt.toISOString(),
@@ -354,51 +328,16 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       || (resolvedExternalCaseId ? normalizeCaseBase(resolvedExternalCaseId) : null);
 
     if (caseBase && patientData) {
-      const now = new Date();
-      const deterministicCaseId = `pathoweb-${caseBase.toLowerCase()}`;
-
       try {
-        let existingCase = await prisma.caseRead.findFirst({
-          where: { patientRef: caseBase },
+        const caseRecord = await findOrCreateCase(prisma, {
+          caseBase,
+          patientData,
+          ownerId: resolvedOwnerId,
         });
+        resolvedCaseId = caseRecord.caseId;
 
-        if (!existingCase) {
-          // Create new case
-          existingCase = await prisma.caseRead.create({
-            data: {
-              caseId: deterministicCaseId,
-              title: patientData.patientName || caseBase,
-              patientRef: caseBase,
-              patientAge: patientData.age ? parseInt(patientData.age, 10) || null : null,
-              doctor: patientData.doctor || null,
-              ownerId: resolvedOwnerId,
-              status: 'active',
-              createdAt: now,
-              updatedAt: now,
-            },
-          });
-          request.log.info({ caseId: deterministicCaseId, caseBase }, 'Auto-created case from PathoWeb data');
-        } else {
-          // Update existing case with fresh patient data
-          const updateData: Record<string, any> = { updatedAt: now };
-          if (patientData.patientName) updateData.title = patientData.patientName;
-          if (patientData.age) updateData.patientAge = parseInt(patientData.age, 10) || null;
-          if (patientData.doctor) updateData.doctor = patientData.doctor;
-          if (resolvedOwnerId && !existingCase.ownerId) updateData.ownerId = resolvedOwnerId;
-
-          await prisma.caseRead.update({
-            where: { caseId: existingCase.caseId },
-            data: updateData,
-          });
-        }
-
-        resolvedCaseId = existingCase.caseId;
-
-        // Link all sibling slides with same externalCaseBase to this case
-        await prisma.slideRead.updateMany({
-          where: { externalCaseBase: caseBase, caseId: null },
-          data: { caseId: resolvedCaseId },
-        });
+        await linkSiblingSlides(prisma, { caseBase, caseId: resolvedCaseId });
+        request.log.info({ caseId: resolvedCaseId, caseBase }, 'Auto-created/updated case from PathoWeb data');
       } catch (err: any) {
         // If duplicate key (race condition), find the existing one
         if (err.code === 'P2002') {
@@ -499,7 +438,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     const { exp, sig } = request.query;
 
     // Validate HMAC signature
-    if (!exp || !sig || !verifyThumbSignature(slideId, exp, sig)) {
+    if (!exp || !sig || !verifyThumb(slideId, exp, sig)) {
       return reply.status(403).send({ error: 'Invalid or expired thumb signature' });
     }
 

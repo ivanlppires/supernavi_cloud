@@ -33,9 +33,13 @@ async function buildServer() {
     bodyLimit: 10 * 1024 * 1024,
   });
 
-  // CORS - enabled for same-origin frontend
+  // CORS - restrict to allowed origins in production
+  const allowedOrigins = config.ALLOWED_ORIGINS
+    ? config.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : true; // Allow all in dev when ALLOWED_ORIGINS is not set
+
   await fastify.register(cors, {
-    origin: true, // Allow all origins (same-origin in production, dev needs CORS)
+    origin: allowedOrigins,
     credentials: true,
   });
 
