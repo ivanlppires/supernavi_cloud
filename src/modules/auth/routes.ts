@@ -619,6 +619,68 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     });
   });
 
+  // DZI metadata proxy — generates DZI XML from preview manifest
+  fastify.get<{
+    Params: { slideId: string };
+  }>('/api/slides/:slideId/dzi', async (request, reply) => {
+    const { slideId } = request.params;
+
+    // Authenticate: normal JWT or magic link JWT
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.status(401).send({ error: 'Missing authorization header' });
+    }
+
+    const token = authHeader.slice(7);
+    const secret = config.MAGIC_LINK_SECRET || config.JWT_SECRET;
+    try {
+      const payload: any = jwt.verify(token, secret);
+      if (payload.sub === 'magic-link' && payload.purpose === 'viewer' && payload.slideId !== slideId) {
+        return reply.status(403).send({ error: 'Token not valid for this slide' });
+      }
+    } catch {
+      if (config.MAGIC_LINK_SECRET && config.MAGIC_LINK_SECRET !== config.JWT_SECRET) {
+        try { jwt.verify(token, config.JWT_SECRET); } catch {
+          return reply.status(401).send({ error: 'Invalid or expired token' });
+        }
+      } else {
+        return reply.status(401).send({ error: 'Invalid or expired token' });
+      }
+    }
+
+    const previewAsset = await prisma.previewAsset.findUnique({ where: { slideId } });
+    if (!previewAsset) {
+      return reply.status(404).send({ error: 'Preview not found' });
+    }
+
+    // Fetch manifest to get dimensions
+    const slide = await prisma.slideRead.findUnique({ where: { slideId } });
+    if (!slide) {
+      return reply.status(404).send({ error: 'Slide not found' });
+    }
+
+    // Generate DZI XML that points tiles to our proxy
+    const dziXml = `<?xml version="1.0" encoding="UTF-8"?>
+<Image xmlns="http://schemas.microsoft.com/deepzoom/2008"
+  Format="jpg"
+  Overlap="0"
+  TileSize="256">
+  <Size Width="${slide.width}" Height="${slide.height}"/>
+</Image>`;
+
+    reply.header('Content-Type', 'application/xml');
+    reply.header('Cache-Control', 'public, max-age=3600');
+    return reply.send(dziXml);
+  });
+
+  // Tile proxy — redirects to /preview/:slideId/tiles/:level/:file
+  fastify.get<{
+    Params: { slideId: string; level: string; file: string };
+  }>('/api/slides/:slideId/tiles/:level/:file', async (request, reply) => {
+    const { slideId, level, file } = request.params;
+    return reply.redirect(`/preview/${slideId}/tiles/${level}/${file}`);
+  });
+
   // Get slide processing progress
   fastify.get<{
     Params: { slideId: string };
