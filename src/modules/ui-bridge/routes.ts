@@ -309,6 +309,52 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // --------------------------------------------------------------------------
+  // POST /api/ui-bridge/cases/:caseBase/detach
+  // --------------------------------------------------------------------------
+  fastify.post<{
+    Params: { caseBase: string };
+    Body: { slideId: string };
+  }>('/api/ui-bridge/cases/:caseBase/detach', {
+    preHandler: authenticateApiKey,
+  }, async (request, reply) => {
+    const caseBase = normalizeCaseBase(request.params.caseBase);
+    const { slideId } = request.body;
+
+    if (!slideId) {
+      return reply.status(400).send({ error: 'slideId is required' });
+    }
+
+    const slide = await prisma.slideRead.findUnique({ where: { slideId } });
+    if (!slide) {
+      return reply.status(404).send({ error: 'Slide not found' });
+    }
+
+    await prisma.slideRead.update({
+      where: { slideId },
+      data: {
+        externalCaseId: null,
+        externalCaseBase: null,
+        confirmedCaseLink: false,
+      },
+    });
+
+    await prisma.viewerAuditLog.create({
+      data: {
+        slideId,
+        externalCaseId: null,
+        action: 'case_detached',
+        ipAddress: request.ip,
+        userAgent: request.headers['user-agent'] || null,
+        metadata: { source: 'pathoweb-extension', previousCaseBase: caseBase },
+      },
+    });
+
+    request.log.info({ slideId, caseBase }, 'Slide detached from case via UI-Bridge');
+
+    return reply.send({ ok: true, slideId });
+  });
+
+  // --------------------------------------------------------------------------
   // POST /api/ui-bridge/viewer-link
   //
   // JWT binds: slideId + externalCaseId + purpose + exp
