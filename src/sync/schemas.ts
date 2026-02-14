@@ -77,6 +77,8 @@ export const previewPublishedPayloadSchema = z
     tiles_prefix: z.string().min(1).optional(),
     low_tiles_prefix: z.string().min(1).optional(),
     max_preview_level: z.number().int().nonnegative(),
+    preview_width: z.number().int().positive().optional(),
+    preview_height: z.number().int().positive().optional(),
     tile_size: z.number().int().positive(),
     format: z.string().min(1),
   })

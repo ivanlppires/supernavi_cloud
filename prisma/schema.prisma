@@ -109,6 +109,8 @@ model PreviewAsset {
   manifestKey     String   @map("manifest_key")
   lowTilesPrefix  String   @map("low_tiles_prefix")
   maxPreviewLevel Int      @map("max_preview_level")
+  previewWidth    Int?     @map("preview_width")
+  previewHeight   Int?     @map("preview_height")
   tileSize        Int      @map("tile_size")
   format          String
   publishedAt     DateTime @default(now()) @map("published_at") @db.Timestamptz
