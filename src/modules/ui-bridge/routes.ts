@@ -216,6 +216,45 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // --------------------------------------------------------------------------
+  // GET /api/ui-bridge/slides/unlinked?hours=168&limit=50
+  //
+  // Returns all slides not linked to any case (for manual association).
+  // --------------------------------------------------------------------------
+  fastify.get<{
+    Querystring: { hours?: string; limit?: string };
+  }>('/api/ui-bridge/slides/unlinked', {
+    preHandler: authenticateApiKey,
+  }, async (request, reply) => {
+    const hours = Math.min(Math.max(parseInt(request.query.hours || '168', 10) || 168, 1), 720);
+    const limit = Math.min(Math.max(parseInt(request.query.limit || '50', 10) || 50, 1), 100);
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    const slides = await prisma.slideRead.findMany({
+      where: {
+        OR: [
+          { externalCaseBase: null },
+          { confirmedCaseLink: false },
+        ],
+        hasPreview: true,
+        updatedAt: { gte: since },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+    });
+
+    return reply.send({
+      slides: slides.map(s => ({
+        slideId: s.slideId,
+        filename: s.svsFilename,
+        thumbUrl: signThumb(s.slideId),
+        width: s.width,
+        height: s.height,
+        createdAt: s.updatedAt.toISOString(),
+      })),
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // POST /api/ui-bridge/cases/:caseBase/attach
   // --------------------------------------------------------------------------
   fastify.post<{
