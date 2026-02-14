@@ -1,8 +1,25 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
 import jwt, { SignOptions } from 'jsonwebtoken';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { prisma } from '../../db/index.js';
 import config from '../../config/index.js';
+
+// S3 client cache (shared with preview routes pattern)
+const s3ClientCache = new Map<string, S3Client>();
+function getS3Client(endpoint: string, region: string): S3Client {
+  const cacheKey = `${endpoint}|${region}`;
+  let client = s3ClientCache.get(cacheKey);
+  if (!client) {
+    client = new S3Client({
+      endpoint, region,
+      credentials: { accessKeyId: config.S3_ACCESS_KEY, secretAccessKey: config.S3_SECRET_KEY },
+      forcePathStyle: config.S3_FORCE_PATH_STYLE,
+    });
+    s3ClientCache.set(cacheKey, client);
+  }
+  return client;
+}
 
 // Google OAuth client
 const googleClient = config.GOOGLE_CLIENT_ID
@@ -653,19 +670,31 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Preview not found' });
     }
 
-    // Fetch manifest to get dimensions
-    const slide = await prisma.slideRead.findUnique({ where: { slideId } });
-    if (!slide) {
-      return reply.status(404).send({ error: 'Slide not found' });
+    // Fetch manifest from S3 to get preview dimensions (not original slide dimensions)
+    const client = getS3Client(previewAsset.wasabiEndpoint, previewAsset.wasabiRegion);
+    const manifestResp = await client.send(new GetObjectCommand({
+      Bucket: previewAsset.wasabiBucket,
+      Key: previewAsset.manifestKey,
+    }));
+
+    if (!manifestResp.Body) {
+      return reply.status(404).send({ error: 'Manifest not found in storage' });
     }
 
-    // Generate DZI XML that points tiles to our proxy
+    const manifest = JSON.parse(await manifestResp.Body.transformToString());
+    const width = manifest.width;
+    const height = manifest.height;
+    const tileSize = manifest.tileSize || 256;
+    const overlap = manifest.overlap || 0;
+    const format = manifest.format || 'jpg';
+
+    // Generate DZI XML using preview dimensions so OpenSeadragon only requests existing tiles
     const dziXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Image xmlns="http://schemas.microsoft.com/deepzoom/2008"
-  Format="jpg"
-  Overlap="0"
-  TileSize="256">
-  <Size Width="${slide.width}" Height="${slide.height}"/>
+  Format="${format}"
+  Overlap="${overlap}"
+  TileSize="${tileSize}">
+  <Size Width="${width}" Height="${height}"/>
 </Image>`;
 
     reply.header('Content-Type', 'application/xml');
