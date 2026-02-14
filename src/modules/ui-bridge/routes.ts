@@ -105,9 +105,11 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
 
     const readySlides = confirmedSlides
       .filter(s => s.hasPreview)
-      .map(s => ({
+      .map((s, i) => ({
         slideId: s.slideId,
-        label: s.externalSlideLabel || '1',
+        label: s.externalSlideLabel || null,
+        filename: s.svsFilename,
+        index: i + 1,
         thumbUrl: signThumb(s.slideId),
         width: s.width,
         height: s.height,
@@ -115,9 +117,11 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
 
     const processingSlides = confirmedSlides
       .filter(s => !s.hasPreview)
-      .map(s => ({
+      .map((s, i) => ({
         slideId: s.slideId,
-        label: s.externalSlideLabel || '1',
+        label: s.externalSlideLabel || null,
+        filename: s.svsFilename,
+        index: readySlides.length + i + 1,
       }));
 
     // Find unconfirmed candidates (recent slides without confirmed link)
