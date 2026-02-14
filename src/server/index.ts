@@ -80,7 +80,9 @@ async function buildServer() {
       // Skip rate limiting for tile endpoints and edge tunnel (viewer needs many tiles)
       return url === '/api/v1/tiles/sign' ||
              url === '/api/v1/tiles/proxy' ||
-             url.startsWith('/edge/');
+             url.startsWith('/edge/') ||
+             url.startsWith('/preview/') ||
+             /^\/api\/slides\/[^/]+\/tiles\//.test(url);
     },
   });
 
@@ -96,7 +98,9 @@ async function buildServer() {
       const url = request.url.split('?')[0];
       const isHighThroughput = url === '/api/v1/tiles/sign' ||
                                url === '/api/v1/tiles/proxy' ||
-                               url.startsWith('/edge/');
+                               url.startsWith('/edge/') ||
+                               url.startsWith('/preview/') ||
+                               /^\/api\/slides\/[^/]+\/tiles\//.test(url);
       return !isHighThroughput;
     },
   });
