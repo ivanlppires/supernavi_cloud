@@ -1,5 +1,5 @@
 import { randomBytes, createHash } from 'crypto';
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyInstance } from 'fastify';
 import { prisma } from '../../db/index.js';
 import { authenticate } from '../auth/routes.js';
 import {

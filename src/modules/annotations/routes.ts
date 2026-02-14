@@ -303,12 +303,9 @@ export async function annotationRoutes(fastify: FastifyInstance): Promise<void> 
    * POST /api/v1/annotations/:id/messages
    * Creates a new message in an annotation thread
    */
-  fastify.post('/api/v1/annotations/:id/messages', {
+  fastify.post<{ Params: { id: string } }>('/api/v1/annotations/:id/messages', {
     preHandler: authenticate,
-  }, async (
-    request: FastifyRequest<{ Params: { id: string } }>,
-    reply: FastifyReply
-  ) => {
+  }, async (request, reply) => {
     const id = parseInt(request.params.id, 10);
 
     if (isNaN(id)) {

@@ -60,7 +60,7 @@ export type CaseDetail = z.infer<typeof caseDetailSchema>;
 // Preview response
 export const previewResponseSchema = z.object({
   slide_id: z.string(),
-  case_id: z.string(),
+  case_id: z.string().nullable(),
   thumb_url: z.string(),
   manifest_url: z.string(),
   tiles: z.object({
