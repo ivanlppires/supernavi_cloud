@@ -235,6 +235,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
 
     const slides = await prisma.slideRead.findMany({
       where: {
+        caseId: null,
         OR: [
           { externalCaseBase: null },
           { confirmedCaseLink: false },
