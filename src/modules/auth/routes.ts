@@ -81,6 +81,24 @@ function userToResponse(user: any): UserResponse {
   };
 }
 
+/**
+ * Derive the user's edge agent ID from slides in their cases.
+ * Returns the most common edge_id, or null if no slides found.
+ */
+async function getUserEdgeId(userId: string): Promise<string | null> {
+  const result = await prisma.$queryRaw<Array<{ edge_id: string }>>`
+    SELECT sr.edge_id
+    FROM slides_read sr
+    JOIN cases_read cr ON sr.case_id = cr.case_id
+    WHERE cr.owner_id = ${userId}::uuid
+      AND sr.edge_id IS NOT NULL
+    GROUP BY sr.edge_id
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+  `;
+  return result.length > 0 ? result[0].edge_id : null;
+}
+
 // Auth middleware - exported for use in other routes
 // Supports both normal user JWT (sub = userId) and magic link JWT (sub = 'magic-link')
 export async function authenticate(
@@ -1097,12 +1115,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         crm: null,
         specialization: null,
         createdAt: new Date().toISOString(),
+        edgeId: null,
       });
     }
 
     const response = userToResponse(user);
-    request.log.info({ avatarUrl: response.avatarUrl, name: response.name }, 'Returning user data');
-    return reply.send(response);
+    const edgeId = await getUserEdgeId(user.id);
+    request.log.info({ avatarUrl: response.avatarUrl, name: response.name, edgeId }, 'Returning user data');
+    return reply.send({ ...response, edgeId });
   });
 
   // Update current user

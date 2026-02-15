@@ -88,6 +88,7 @@ async function projectSlideRegistered(
     create: {
       slideId: payload.slide_id,
       caseId: payload.case_id ?? null,
+      edgeId: event.edge_id,
       svsFilename: payload.svs_filename,
       width: payload.width,
       height: payload.height,
@@ -103,6 +104,7 @@ async function projectSlideRegistered(
     },
     update: {
       ...(payload.case_id && { caseId: payload.case_id }),
+      edgeId: event.edge_id,
       svsFilename: payload.svs_filename,
       ...(payload.width > 0 && { width: payload.width }),
       ...(payload.height > 0 && { height: payload.height }),

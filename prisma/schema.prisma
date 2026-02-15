@@ -82,6 +82,7 @@ model SlideRead {
   externalCaseBase   String?   @map("external_case_base")
   externalSlideLabel String?   @map("external_slide_label")
   confirmedCaseLink  Boolean   @default(true) @map("confirmed_case_link")
+  edgeId             String?   @map("edge_id")
   readyForReviewAt   DateTime? @map("ready_for_review_at") @db.Timestamptz
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   lastEventId        String?   @map("last_event_id")
@@ -94,6 +95,7 @@ model SlideRead {
   @@index([hasPreview])
   @@index([externalCaseId])
   @@index([externalCaseBase])
+  @@index([edgeId])
   @@map("slides_read")
 }
 
