@@ -91,11 +91,20 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     const caseBase = normalizeCaseBase(request.params.caseBase);
     const externalCaseId = toExternalCaseId(caseBase);
 
-    // Find confirmed slides for this case
+    // Find the internal case ID (if exists) so we also find slides linked via viewer
+    const internalCase = await prisma.caseRead.findFirst({
+      where: { patientRef: caseBase },
+      select: { caseId: true },
+    });
+
+    // Find confirmed slides for this case (by externalCaseBase OR by caseId)
     const confirmedSlides = await prisma.slideRead.findMany({
       where: {
-        externalCaseBase: caseBase,
         confirmedCaseLink: true,
+        OR: [
+          { externalCaseBase: caseBase },
+          ...(internalCase ? [{ caseId: internalCase.caseId }] : []),
+        ],
       },
       include: {
         previewAsset: true,

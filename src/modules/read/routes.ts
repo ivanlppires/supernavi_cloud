@@ -415,7 +415,12 @@ export async function readRoutes(fastify: FastifyInstance): Promise<void> {
 
       await prisma.slideRead.update({
         where: { slideId },
-        data: { caseId, confirmedCaseLink: true },
+        data: {
+          caseId,
+          confirmedCaseLink: true,
+          // Propagate externalCaseBase so the extension also sees this slide
+          ...(caseData.patientRef ? { externalCaseBase: caseData.patientRef } : {}),
+        },
       });
 
       await prisma.viewerAuditLog.create({
