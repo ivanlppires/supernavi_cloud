@@ -82,6 +82,7 @@ function userToResponse(user: any): UserResponse {
 }
 
 // Auth middleware - exported for use in other routes
+// Supports both normal user JWT (sub = userId) and magic link JWT (sub = 'magic-link')
 export async function authenticate(
   request: FastifyRequest,
   reply: FastifyReply
@@ -92,9 +93,25 @@ export async function authenticate(
   }
 
   const token = authHeader.slice(7);
-  const payload = verifyToken(token);
+  let payload = verifyToken(token);
+
+  // If JWT_SECRET fails, try MAGIC_LINK_SECRET
+  if (!payload && config.MAGIC_LINK_SECRET && config.MAGIC_LINK_SECRET !== config.JWT_SECRET) {
+    try {
+      payload = jwt.verify(token, config.MAGIC_LINK_SECRET) as { sub: string };
+    } catch {
+      // ignore
+    }
+  }
+
   if (!payload) {
     return reply.status(401).send({ error: 'Invalid or expired token' });
+  }
+
+  // Magic link tokens: attach minimal info, skip user lookup
+  if (payload.sub === 'magic-link') {
+    (request as any).user = { id: 'magic-link', role: 'viewer' };
+    return;
   }
 
   const user = await prisma.user.findUnique({
