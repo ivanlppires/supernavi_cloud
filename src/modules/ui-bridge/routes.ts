@@ -507,6 +507,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         mode: 'api-key',
         device: null,
         user: null,
+        edgeAgentId: null,
       });
     }
 
@@ -515,6 +516,22 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       where: { id: device.clinicId },
       select: { id: true, name: true, email: true, avatarUrl: true },
     });
+
+    // Derive edge agent ID from user's slides
+    let edgeAgentId: string | null = null;
+    if (user) {
+      const edgeResult = await prisma.$queryRaw<Array<{ edge_id: string }>>`
+        SELECT sr.edge_id
+        FROM slides_read sr
+        JOIN cases_read cr ON sr.case_id = cr.case_id
+        WHERE cr.owner_id = ${device.clinicId}::uuid
+          AND sr.edge_id IS NOT NULL
+        GROUP BY sr.edge_id
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+      `;
+      edgeAgentId = edgeResult.length > 0 ? edgeResult[0].edge_id : null;
+    }
 
     return reply.send({
       authenticated: true,
@@ -528,6 +545,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         email: user.email,
         avatarUrl: user.avatarUrl,
       } : null,
+      edgeAgentId,
     });
   });
 
