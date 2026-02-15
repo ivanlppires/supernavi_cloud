@@ -462,16 +462,27 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
     const slides = await prisma.slideRead.findMany({
       where: { caseId },
+      include: { previewAsset: true },
     });
 
     const result = slides.map(s => ({
       id: s.slideId,
-      caseId: s.caseId,
+      caseId: s.caseId || '',
       name: s.svsFilename.replace(/\.[^/.]+$/, ''),
       originalFilename: s.svsFilename,
+      fileFormat: s.svsFilename.split('.').pop()?.toLowerCase() || 'svs',
+      fileSize: '0',
+      storagePath: null,
+      dziPath: s.previewAsset ? `slides/${s.slideId}/${s.slideId}.dzi` : null,
+      thumbnailUrl: s.previewAsset ? `/preview/${s.slideId}/thumb.jpg` : null,
+      mpp: s.mpp?.toString() || null,
       width: s.width,
       height: s.height,
       processingStatus: s.hasPreview ? 'ready' : 'processing',
+      processingError: null,
+      uploadedAt: s.updatedAt.toISOString(),
+      processedAt: s.hasPreview ? s.updatedAt.toISOString() : null,
+      externalCaseBase: s.externalCaseBase || null,
     }));
 
     return reply.send(result);

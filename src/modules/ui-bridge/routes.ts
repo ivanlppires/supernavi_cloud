@@ -283,12 +283,20 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Slide not found' });
     }
 
+    // Find existing case for this caseBase (if any sibling slide already has one)
+    const siblingWithCase = await prisma.slideRead.findFirst({
+      where: { externalCaseBase: caseBase, caseId: { not: null } },
+      select: { caseId: true },
+    });
+    const resolvedCaseId = siblingWithCase?.caseId ?? null;
+
     await prisma.slideRead.update({
       where: { slideId },
       data: {
         externalCaseId,
         externalCaseBase: caseBase,
         confirmedCaseLink: true,
+        ...(resolvedCaseId && !slide.caseId ? { caseId: resolvedCaseId } : {}),
       },
     });
 
@@ -303,9 +311,9 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       },
     });
 
-    request.log.info({ slideId, caseBase }, 'Slide attached to case via UI-Bridge');
+    request.log.info({ slideId, caseBase, caseId: resolvedCaseId }, 'Slide attached to case via UI-Bridge');
 
-    return reply.send({ ok: true, slideId, caseBase, externalCaseId });
+    return reply.send({ ok: true, slideId, caseBase, externalCaseId, caseId: resolvedCaseId });
   });
 
   // --------------------------------------------------------------------------
