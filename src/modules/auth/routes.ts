@@ -108,9 +108,15 @@ export async function authenticate(
     return reply.status(401).send({ error: 'Invalid or expired token' });
   }
 
-  // Magic link tokens: attach minimal info, skip user lookup
+  // Magic link tokens: use embedded userId if available, skip user lookup
   if (payload.sub === 'magic-link') {
-    (request as any).user = { id: 'magic-link', role: 'viewer' };
+    const mlPayload = payload as any;
+    const userId = mlPayload.userId || 'magic-link';
+    (request as any).user = {
+      id: userId,
+      name: mlPayload.userName || null,
+      role: 'viewer',
+    };
     return;
   }
 
@@ -1079,6 +1085,21 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     preHandler: authenticate,
   }, async (request, reply) => {
     const user = (request as any).user;
+
+    // Magic link users don't have a full DB record
+    if (user.role === 'viewer' && !user.email) {
+      return reply.send({
+        id: user.id,
+        email: '',
+        name: user.name || 'Viewer',
+        role: 'viewer',
+        avatarUrl: null,
+        crm: null,
+        specialization: null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     const response = userToResponse(user);
     request.log.info({ avatarUrl: response.avatarUrl, name: response.name }, 'Returning user data');
     return reply.send(response);
