@@ -249,7 +249,6 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
           { externalCaseBase: null },
           { confirmedCaseLink: false },
         ],
-        hasPreview: true,
         updatedAt: { gte: since },
       },
       orderBy: { updatedAt: 'desc' },
@@ -260,9 +259,10 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       slides: slides.map(s => ({
         slideId: s.slideId,
         filename: s.svsFilename,
-        thumbUrl: signThumb(s.slideId),
+        thumbUrl: s.hasPreview ? signThumb(s.slideId) : null,
         width: s.width,
         height: s.height,
+        hasPreview: s.hasPreview,
         createdAt: s.updatedAt.toISOString(),
       })),
     });
