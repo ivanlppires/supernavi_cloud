@@ -618,10 +618,18 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
-    // If magic link, verify the slideId matches
+    // If magic link, verify the slideId matches or is a sibling slide (same case)
     if (payload.sub === 'magic-link' && payload.purpose === 'viewer') {
       if (payload.slideId !== slideId) {
-        return reply.status(403).send({ error: 'Token not valid for this slide' });
+        // Allow access to sibling slides in the same case
+        if (payload.caseId) {
+          const targetSlide = await prisma.slideRead.findUnique({ where: { slideId }, select: { caseId: true } });
+          if (!targetSlide || targetSlide.caseId !== payload.caseId) {
+            return reply.status(403).send({ error: 'Token not valid for this slide' });
+          }
+        } else {
+          return reply.status(403).send({ error: 'Token not valid for this slide' });
+        }
       }
     } else if (payload.sub) {
       // Normal user token — verify user exists
@@ -681,7 +689,15 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     try {
       const payload: any = jwt.verify(token, secret);
       if (payload.sub === 'magic-link' && payload.purpose === 'viewer' && payload.slideId !== slideId) {
-        return reply.status(403).send({ error: 'Token not valid for this slide' });
+        // Allow access to sibling slides in the same case
+        if (payload.caseId) {
+          const targetSlide = await prisma.slideRead.findUnique({ where: { slideId }, select: { caseId: true } });
+          if (!targetSlide || targetSlide.caseId !== payload.caseId) {
+            return reply.status(403).send({ error: 'Token not valid for this slide' });
+          }
+        } else {
+          return reply.status(403).send({ error: 'Token not valid for this slide' });
+        }
       }
     } catch {
       if (config.MAGIC_LINK_SECRET && config.MAGIC_LINK_SECRET !== config.JWT_SECRET) {
