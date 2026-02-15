@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import prisma from '../../db/index.js';
 import { getSignedUrlForKey, extractSlideIdFromKey } from '../wasabi/wasabiSigner.js';
 import config from '../../config/index.js';
+import { authenticate } from '../auth/routes.js';
 import {
   paginationSchema,
   tileSignRequestSchema,
@@ -340,6 +341,145 @@ export async function readRoutes(fastify: FastifyInstance): Promise<void> {
     } catch (err) {
       request.log.error({ error: err, key }, 'Failed to generate presigned URL for proxy');
       return reply.status(500).send({ error: 'Failed to generate presigned URL' });
+    }
+  });
+  // ==========================================================================
+  // Slide linking/unlinking (authenticated via JWT)
+  // ==========================================================================
+
+  /**
+   * GET /api/v1/slides/unlinked
+   * Returns slides not linked to any case (have preview, last 7 days)
+   */
+  fastify.get('/api/v1/slides/unlinked', {
+    preHandler: authenticate,
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    try {
+      const slides = await prisma.slideRead.findMany({
+        where: {
+          caseId: null,
+          hasPreview: true,
+          updatedAt: { gte: since },
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 50,
+      });
+
+      return reply.send({
+        slides: slides.map(s => ({
+          slideId: s.slideId,
+          filename: s.svsFilename,
+          thumbUrl: `/preview/${s.slideId}/thumb.jpg`,
+          width: s.width,
+          height: s.height,
+          createdAt: s.updatedAt.toISOString(),
+        })),
+      });
+    } catch (err) {
+      request.log.error({ error: err }, 'Failed to fetch unlinked slides');
+      return reply.status(500).send({ error: 'Failed to fetch unlinked slides' });
+    }
+  });
+
+  /**
+   * POST /api/v1/slides/:slideId/link
+   * Link a slide to a case by setting case_id
+   */
+  fastify.post<{
+    Params: { slideId: string };
+    Body: { caseId: string };
+  }>('/api/v1/slides/:slideId/link', {
+    preHandler: authenticate,
+  }, async (request, reply) => {
+    const { slideId } = request.params;
+    const { caseId } = request.body;
+
+    if (!caseId) {
+      return reply.status(400).send({ error: 'caseId is required' });
+    }
+
+    try {
+      const [slide, caseData] = await Promise.all([
+        prisma.slideRead.findUnique({ where: { slideId } }),
+        prisma.caseRead.findUnique({ where: { caseId } }),
+      ]);
+
+      if (!slide) {
+        return reply.status(404).send({ error: 'Slide not found' });
+      }
+      if (!caseData) {
+        return reply.status(404).send({ error: 'Case not found' });
+      }
+
+      await prisma.slideRead.update({
+        where: { slideId },
+        data: { caseId, confirmedCaseLink: true },
+      });
+
+      await prisma.viewerAuditLog.create({
+        data: {
+          slideId,
+          action: 'slide_linked',
+          ipAddress: request.ip,
+          userAgent: request.headers['user-agent'] || null,
+          metadata: { source: 'viewer-frontend', caseId },
+        },
+      });
+
+      request.log.info({ slideId, caseId }, 'Slide linked to case');
+      return reply.send({ ok: true, slideId, caseId });
+    } catch (err) {
+      request.log.error({ error: err }, 'Failed to link slide');
+      return reply.status(500).send({ error: 'Failed to link slide' });
+    }
+  });
+
+  /**
+   * POST /api/v1/slides/:slideId/unlink
+   * Remove a slide from its case
+   */
+  fastify.post<{
+    Params: { slideId: string };
+  }>('/api/v1/slides/:slideId/unlink', {
+    preHandler: authenticate,
+  }, async (request, reply) => {
+    const { slideId } = request.params;
+
+    try {
+      const slide = await prisma.slideRead.findUnique({ where: { slideId } });
+      if (!slide) {
+        return reply.status(404).send({ error: 'Slide not found' });
+      }
+
+      const previousCaseId = slide.caseId;
+
+      await prisma.slideRead.update({
+        where: { slideId },
+        data: {
+          caseId: null,
+          externalCaseId: null,
+          externalCaseBase: null,
+          confirmedCaseLink: false,
+        },
+      });
+
+      await prisma.viewerAuditLog.create({
+        data: {
+          slideId,
+          action: 'slide_unlinked',
+          ipAddress: request.ip,
+          userAgent: request.headers['user-agent'] || null,
+          metadata: { source: 'viewer-frontend', previousCaseId },
+        },
+      });
+
+      request.log.info({ slideId, previousCaseId }, 'Slide unlinked from case');
+      return reply.send({ ok: true, slideId });
+    } catch (err) {
+      request.log.error({ error: err }, 'Failed to unlink slide');
+      return reply.status(500).send({ error: 'Failed to unlink slide' });
     }
   });
 }
