@@ -437,7 +437,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     // Resolve user from paired device (if available)
     const device = (request as any).extensionDevice as
       | { id: string; clinicId: string } | undefined;
-    let userPayload: { userId?: string; userName?: string; userAvatar?: string } = {};
+    let userPayload: { userId?: string; userName?: string; userAvatar?: string; edgeId?: string } = {};
     let resolvedOwnerId: string | null = null;
     if (device) {
       const user = await prisma.user.findUnique({
@@ -446,10 +446,17 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       });
       if (user) {
         resolvedOwnerId = user.id;
+        // Get user's primary edge ID for edge-first tile loading
+        const edges = await prisma.userEdge.findMany({
+          where: { userId: user.id },
+          select: { edgeId: true, isPrimary: true },
+          orderBy: { isPrimary: 'desc' },
+        });
         userPayload = {
           userId: user.id,
           userName: user.name ?? undefined,
           userAvatar: user.avatarUrl ?? undefined,
+          edgeId: edges[0]?.edgeId ?? undefined,
         };
       }
     }
