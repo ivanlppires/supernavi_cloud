@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import config from '../../config/index.js';
 import {
@@ -113,9 +113,54 @@ export async function signPreviewAssetUrl(
   return getSignedUrlForKey(key, expiresSeconds, bucket, clientConfig);
 }
 
+/**
+ * Delete all preview objects for a slide from S3
+ *
+ * Lists all objects with prefix `previews/{slideId}/` and deletes them in batches.
+ * Returns the count of deleted objects.
+ */
+export async function deletePreviewObjects(
+  slideId: string,
+  bucket: string = config.S3_BUCKET,
+  clientConfig?: { endpoint: string; region: string }
+): Promise<{ deleted: number }> {
+  const endpoint = clientConfig?.endpoint ?? config.S3_ENDPOINT;
+  const region = clientConfig?.region ?? config.S3_REGION;
+  const client = getS3ClientForConfig(endpoint, region);
+  const prefix = `previews/${slideId}/`;
+
+  let deleted = 0;
+  let continuationToken: string | undefined;
+
+  do {
+    const listResponse = await client.send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    }));
+
+    const objects = listResponse.Contents;
+    if (!objects || objects.length === 0) break;
+
+    await client.send(new DeleteObjectsCommand({
+      Bucket: bucket,
+      Delete: {
+        Objects: objects.map(o => ({ Key: o.Key! })),
+        Quiet: true,
+      },
+    }));
+
+    deleted += objects.length;
+    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return { deleted };
+}
+
 export default {
   getSignedUrlForKey,
   signPreviewAssetUrl,
+  deletePreviewObjects,
   isValidKey,
   validateTileKeyAgainstPrefix,
   extractSlideIdFromKey,

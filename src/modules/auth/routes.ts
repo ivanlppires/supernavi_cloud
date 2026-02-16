@@ -2,8 +2,11 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { randomUUID } from 'crypto';
 import { prisma } from '../../db/index.js';
 import config from '../../config/index.js';
+import { deletePreviewObjects } from '../wasabi/wasabiSigner.js';
+import { sendHttpRequest, isAgentConnected } from '../edge/connectionManager.js';
 
 // S3 client cache (shared with preview routes pattern)
 const s3ClientCache = new Map<string, S3Client>();
@@ -470,7 +473,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  // Delete case permanently
+  // Delete case permanently (with full cleanup: DB, S3, edge files)
   fastify.delete<{
     Params: { id: string };
   }>('/api/cases/:id', {
@@ -479,11 +482,58 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = request.params;
 
     try {
+      // 1. Collect slides before cascade deletes them
+      const slides = await prisma.slideRead.findMany({
+        where: { caseId: id },
+        select: { slideId: true, edgeId: true },
+      });
+      const slideIds = slides.map(s => s.slideId);
+
+      // 2. Delete records without FK cascade (annotations, audit logs)
+      if (slideIds.length > 0) {
+        await prisma.annotationRead.deleteMany({
+          where: { slideId: { in: slideIds } },
+        });
+        await prisma.viewerAuditLog.deleteMany({
+          where: { slideId: { in: slideIds } },
+        });
+      }
+
+      // 3. Delete S3 preview objects (best-effort)
+      for (const slideId of slideIds) {
+        try {
+          const result = await deletePreviewObjects(slideId);
+          if (result.deleted > 0) {
+            request.log.info({ slideId, deleted: result.deleted }, 'Deleted S3 preview objects');
+          }
+        } catch (err) {
+          request.log.warn({ slideId, error: err }, 'Failed to delete S3 preview objects');
+        }
+      }
+
+      // 4. Delete files on edge via tunnel (best-effort)
+      for (const slide of slides) {
+        if (slide.edgeId && isAgentConnected(slide.edgeId)) {
+          try {
+            await sendHttpRequest(slide.edgeId, {
+              requestId: randomUUID(),
+              method: 'DELETE',
+              url: `/v1/slides/${slide.slideId}`,
+              headers: {},
+            }, 10000);
+            request.log.info({ slideId: slide.slideId, edgeId: slide.edgeId }, 'Deleted slide on edge');
+          } catch (err) {
+            request.log.warn({ slideId: slide.slideId, edgeId: slide.edgeId, error: err }, 'Failed to delete slide on edge');
+          }
+        }
+      }
+
+      // 5. Delete case (cascades to slides_read, preview_assets, collaborators)
       await prisma.caseRead.delete({
         where: { caseId: id },
       });
 
-      request.log.info({ caseId: id }, 'Case deleted permanently');
+      request.log.info({ caseId: id, slidesDeleted: slideIds.length }, 'Case deleted permanently with full cleanup');
       return reply.status(204).send();
     } catch (error) {
       request.log.error({ error, caseId: id }, 'Failed to delete case');
