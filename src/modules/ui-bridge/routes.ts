@@ -100,8 +100,20 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     // Find the internal case ID (if exists) so we also find slides linked via viewer
     const internalCase = await prisma.caseRead.findFirst({
       where: { patientRef: caseBase },
-      select: { caseId: true },
+      select: { caseId: true, status: true },
     });
+
+    // If case was deleted (trash), return empty status
+    if (internalCase?.status === 'deleted') {
+      return reply.send({
+        caseBase,
+        externalCaseId,
+        readySlides: [],
+        processingSlides: [],
+        unconfirmedCandidates: [],
+        lastUpdated: null,
+      });
+    }
 
     // Find confirmed slides for this case (by externalCaseBase OR by caseId)
     const confirmedSlides = await prisma.slideRead.findMany({
