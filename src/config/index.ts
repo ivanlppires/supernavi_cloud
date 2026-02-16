@@ -25,7 +25,7 @@ const envSchema = z.object({
 
   // Edge Tunnel Timeouts (milliseconds)
   EDGE_TUNNEL_HEALTH_TIMEOUT_MS: z.coerce.number().default(2000),
-  EDGE_TUNNEL_TILE_TIMEOUT_MS: z.coerce.number().default(8000),
+  EDGE_TUNNEL_TILE_TIMEOUT_MS: z.coerce.number().default(30000),
 
   // JWT Authentication
   JWT_SECRET: z.string().default('dev-jwt-secret-change-in-production'),
