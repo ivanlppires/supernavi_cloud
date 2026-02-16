@@ -13,6 +13,7 @@ import {
   findOrCreateCase,
   linkSiblingSlides,
 } from './helpers.js';
+import { getUserEdgeIds, edgeFilter, getAuthUserId } from './tenant.js';
 
 // ============================================================================
 // Helpers
@@ -91,6 +92,11 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     const caseBase = normalizeCaseBase(request.params.caseBase);
     const externalCaseId = toExternalCaseId(caseBase);
 
+    // Tenant isolation: resolve allowed edges for this user
+    const userId = getAuthUserId(request);
+    const allowedEdges = userId ? await getUserEdgeIds(userId) : null;
+    const edgeWhere = edgeFilter(allowedEdges);
+
     // Find the internal case ID (if exists) so we also find slides linked via viewer
     const internalCase = await prisma.caseRead.findFirst({
       where: { patientRef: caseBase },
@@ -101,6 +107,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     const confirmedSlides = await prisma.slideRead.findMany({
       where: {
         confirmedCaseLink: true,
+        ...edgeWhere,
         OR: [
           { externalCaseBase: caseBase },
           ...(internalCase ? [{ caseId: internalCase.caseId }] : []),
@@ -137,6 +144,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const recentUnlinked = await prisma.slideRead.findMany({
       where: {
+        ...edgeWhere,
         OR: [
           { externalCaseBase: null },
           { confirmedCaseLink: false },
@@ -194,8 +202,13 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     const hours = Math.min(Math.max(parseInt(request.query.hours || '24', 10) || 24, 1), 168);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
+    // Tenant isolation
+    const userId = getAuthUserId(request);
+    const allowedEdges = userId ? await getUserEdgeIds(userId) : null;
+
     const recentSlides = await prisma.slideRead.findMany({
       where: {
+        ...edgeFilter(allowedEdges),
         OR: [
           { externalCaseBase: null },
           { confirmedCaseLink: false },
@@ -242,9 +255,14 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     const limit = Math.min(Math.max(parseInt(request.query.limit || '50', 10) || 50, 1), 100);
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
+    // Tenant isolation
+    const userId = getAuthUserId(request);
+    const allowedEdges = userId ? await getUserEdgeIds(userId) : null;
+
     const slides = await prisma.slideRead.findMany({
       where: {
         caseId: null,
+        ...edgeFilter(allowedEdges),
         OR: [
           { externalCaseBase: null },
           { confirmedCaseLink: false },
@@ -293,9 +311,16 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Slide not found' });
     }
 
+    // Tenant isolation: verify slide belongs to user's edges
+    const userId = getAuthUserId(request);
+    const allowedEdges = userId ? await getUserEdgeIds(userId) : null;
+    if (allowedEdges && slide.edgeId && !allowedEdges.includes(slide.edgeId)) {
+      return reply.status(404).send({ error: 'Slide not found' });
+    }
+
     // Find existing case for this caseBase (if any sibling slide already has one)
     const siblingWithCase = await prisma.slideRead.findFirst({
-      where: { externalCaseBase: caseBase, caseId: { not: null } },
+      where: { externalCaseBase: caseBase, caseId: { not: null }, ...edgeFilter(allowedEdges) },
       select: { caseId: true },
     });
     const resolvedCaseId = siblingWithCase?.caseId ?? null;
@@ -517,9 +542,19 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       select: { id: true, name: true, email: true, avatarUrl: true },
     });
 
-    // Derive edge agent ID from user's slides
+    // Resolve edge agent ID from user_edges (explicit) or fallback to heuristic
     let edgeAgentId: string | null = null;
-    if (user) {
+    const userEdges = await prisma.userEdge.findMany({
+      where: { userId: device.clinicId },
+      select: { edgeId: true, isPrimary: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (userEdges.length > 0) {
+      const primary = userEdges.find(e => e.isPrimary);
+      edgeAgentId = primary ? primary.edgeId : userEdges[0].edgeId;
+    } else if (user) {
+      // Legacy fallback: derive from slides (will be removed once all users have user_edges)
       const edgeResult = await prisma.$queryRaw<Array<{ edge_id: string }>>`
         SELECT sr.edge_id
         FROM slides_read sr
@@ -546,6 +581,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         avatarUrl: user.avatarUrl,
       } : null,
       edgeAgentId,
+      edges: userEdges.map(e => ({ edgeId: e.edgeId, isPrimary: e.isPrimary })),
     });
   });
 

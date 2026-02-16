@@ -143,6 +143,7 @@ model User {
 
   settings       UserSettings?
   collaborations CaseCollaborator[]
+  edges          UserEdge[]
 
   @@index([email])
   @@map("users")
@@ -164,6 +165,22 @@ model UserSettings {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+/// N:N link between users and edge agents they can access
+model UserEdge {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  edgeId    String   @map("edge_id")
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, edgeId])
+  @@index([userId])
+  @@index([edgeId])
+  @@map("user_edges")
 }
 
 /// Read model for annotations (ROIs)
