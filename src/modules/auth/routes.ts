@@ -82,21 +82,17 @@ function userToResponse(user: any): UserResponse {
 }
 
 /**
- * Derive the user's edge agent ID from slides in their cases.
- * Returns the most common edge_id, or null if no slides found.
+ * Get the user's primary edge agent ID from user_edges table.
+ * Falls back to first linked edge if no primary is set.
  */
 async function getUserEdgeId(userId: string): Promise<string | null> {
-  const result = await prisma.$queryRaw<Array<{ edge_id: string }>>`
-    SELECT sr.edge_id
-    FROM slides_read sr
-    JOIN cases_read cr ON sr.case_id = cr.case_id
-    WHERE cr.owner_id = ${userId}::uuid
-      AND sr.edge_id IS NOT NULL
-    GROUP BY sr.edge_id
-    ORDER BY COUNT(*) DESC
-    LIMIT 1
-  `;
-  return result.length > 0 ? result[0].edge_id : null;
+  const edges = await prisma.userEdge.findMany({
+    where: { userId },
+    select: { edgeId: true, isPrimary: true },
+    orderBy: { isPrimary: 'desc' },
+  });
+  if (edges.length === 0) return null;
+  return edges[0].edgeId;
 }
 
 // Auth middleware - exported for use in other routes
