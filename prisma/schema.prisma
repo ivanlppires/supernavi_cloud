@@ -167,18 +167,21 @@ model UserSettings {
   @@map("user_settings")
 }
 
-/// N:N link between users and edge agents they can access
+/// N:N link between users and edge agents they can access.
+/// When userId is null, the row is a pending invitation (matched by email on first login).
 model UserEdge {
   id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  email     String
   edgeId    String   @map("edge_id")
   isPrimary Boolean  @default(false) @map("is_primary")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, edgeId])
+  @@unique([email, edgeId])
   @@index([userId])
+  @@index([email])
   @@index([edgeId])
   @@map("user_edges")
 }

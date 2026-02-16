@@ -1081,6 +1081,22 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
+      // Resolve pending user_edges (admin pre-linked by email)
+      try {
+        const resolved = await prisma.userEdge.updateMany({
+          where: { email: user.email.toLowerCase(), userId: null },
+          data: { userId: user.id },
+        });
+        if (resolved.count > 0) {
+          request.log.info(
+            { userId: user.id, email: user.email, count: resolved.count },
+            'Resolved pending user-edge associations',
+          );
+        }
+      } catch (err: any) {
+        request.log.warn({ err, userId: user.id }, 'Failed to resolve pending user-edges');
+      }
+
       // Generate JWT
       const accessToken = signToken(user.id);
 
