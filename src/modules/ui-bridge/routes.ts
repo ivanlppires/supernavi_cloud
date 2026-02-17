@@ -387,6 +387,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     await prisma.slideRead.update({
       where: { slideId },
       data: {
+        caseId: null,
         externalCaseId: null,
         externalCaseBase: null,
         confirmedCaseLink: false,
