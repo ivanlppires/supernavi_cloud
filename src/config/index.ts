@@ -27,6 +27,10 @@ const envSchema = z.object({
   EDGE_TUNNEL_HEALTH_TIMEOUT_MS: z.coerce.number().default(2000),
   EDGE_TUNNEL_TILE_TIMEOUT_MS: z.coerce.number().default(30000),
 
+  // Tile cache (in-memory LRU for tunnel-proxied tiles)
+  EDGE_TILE_CACHE_MAX_MB: z.coerce.number().default(256),
+  EDGE_TILE_CACHE_TTL_MS: z.coerce.number().default(600000), // 10 minutes
+
   // JWT Authentication
   JWT_SECRET: z.string().default('dev-jwt-secret-change-in-production'),
   JWT_EXPIRES_IN: z.string().default('7d'),

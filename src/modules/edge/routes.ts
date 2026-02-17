@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { RawData } from 'ws';
 import { randomUUID } from 'crypto';
 import config from '../../config/index.js';
+import { TileCache } from './tileCache.js';
 import {
   registerEdge,
   unregisterEdge,
@@ -35,6 +36,12 @@ const FILTERED_RESPONSE_HEADERS = new Set([
   'upgrade',
   'trailer',
 ]);
+
+// Singleton tile cache for tunnel-proxied tiles
+const tileCache = new TileCache({
+  maxSizeMB: config.EDGE_TILE_CACHE_MAX_MB,
+  ttlMs: config.EDGE_TILE_CACHE_TTL_MS,
+});
 
 /**
  * Validate the edge tunnel token
@@ -159,6 +166,14 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   /**
+   * GET /edge/tile-cache/stats
+   * Returns tile cache statistics (for debugging)
+   */
+  fastify.get('/edge/tile-cache/stats', async (_request: FastifyRequest, reply: FastifyReply) => {
+    return reply.send(tileCache.stats());
+  });
+
+  /**
    * Reverse proxy for edge requests
    * ANY /edge/:agentId/*
    *
@@ -188,6 +203,19 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
       ? request.url.substring(request.url.indexOf('?'))
       : '';
     const url = path + queryString;
+
+    // --- Tile cache check ---
+    const tileMatch = path.match(/^\/v1\/slides\/([^/]+)\/tiles\/(\d+)\/(\d+)\/(\d+)\.(?:jpg|jpeg|png)$/);
+    if (tileMatch && request.method === 'GET') {
+      const [, slideId, zStr, xStr, yStr] = tileMatch;
+      const cached = tileCache.get(slideId, Number(zStr), Number(xStr), Number(yStr));
+      if (cached) {
+        reply.header('Content-Type', cached.contentType);
+        reply.header('X-Tile-Cache', 'HIT');
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+        return reply.send(cached.buffer);
+      }
+    }
 
     // Filter headers
     const headers: Record<string, string> = {};
@@ -245,6 +273,15 @@ export async function edgeRoutes(fastify: FastifyInstance): Promise<void> {
       // Send body
       if (response.bodyBase64) {
         const body = Buffer.from(response.bodyBase64, 'base64');
+
+        // Cache tile responses (only 200)
+        if (tileMatch && response.statusCode === 200) {
+          const [, slideId, zStr, xStr, yStr] = tileMatch;
+          const contentType = (response.headers?.['content-type'] || response.headers?.['Content-Type'] || 'image/jpeg') as string;
+          tileCache.set(slideId, Number(zStr), Number(xStr), Number(yStr), body, contentType);
+          reply.header('X-Tile-Cache', 'MISS');
+        }
+
         return reply.send(body);
       }
 
