@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../db/index.js';
 import { authenticate } from '../auth/routes.js';
+import config from '../../config/index.js';
 
 // ============================================================================
 // Admin middleware — requires role=admin
@@ -177,12 +178,15 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   // --------------------------------------------------------------------------
   // POST /api/admin/dev-reset
   // Wipes all slide-related data (slides, previews, annotations, events).
-  // Only available in development mode.
+  // Auth: x-supernavi-key header (same key used by UI-Bridge / extension).
+  // In dev mode (NODE_ENV != production), no auth required.
   // --------------------------------------------------------------------------
   fastify.post('/api/admin/dev-reset', async (request, reply) => {
-    const config = await import('../../config/index.js');
-    if (config.default.NODE_ENV === 'production') {
-      return reply.status(403).send({ error: 'dev-reset is disabled in production' });
+    if (config.NODE_ENV === 'production') {
+      const apiKey = request.headers['x-supernavi-key'] as string | undefined;
+      if (!apiKey || !config.UI_BRIDGE_API_KEY || apiKey !== config.UI_BRIDGE_API_KEY) {
+        return reply.status(401).send({ error: 'x-supernavi-key required' });
+      }
     }
 
     const deleted = {
