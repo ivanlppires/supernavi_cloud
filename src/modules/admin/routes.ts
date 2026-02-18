@@ -173,4 +173,50 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
     return reply.send({ edges });
   });
+
+  // --------------------------------------------------------------------------
+  // POST /api/admin/dev-reset
+  // Wipes all slide-related data (slides, previews, annotations, events).
+  // Only available in development mode.
+  // --------------------------------------------------------------------------
+  fastify.post('/api/admin/dev-reset', async (request, reply) => {
+    const config = await import('../../config/index.js');
+    if (config.default.NODE_ENV === 'production') {
+      return reply.status(403).send({ error: 'dev-reset is disabled in production' });
+    }
+
+    const deleted = {
+      messages_read: 0,
+      annotations_read: 0,
+      viewer_audit_log: 0,
+      preview_assets: 0,
+      slides_read: 0,
+      events_slide: 0,
+    };
+
+    // Order matters: respect FK constraints
+    const r1 = await prisma.messageRead.deleteMany({});
+    deleted.messages_read = r1.count;
+
+    const r2 = await prisma.annotationRead.deleteMany({});
+    deleted.annotations_read = r2.count;
+
+    const r3 = await prisma.viewerAuditLog.deleteMany({});
+    deleted.viewer_audit_log = r3.count;
+
+    const r4 = await prisma.previewAsset.deleteMany({});
+    deleted.preview_assets = r4.count;
+
+    const r5 = await prisma.slideRead.deleteMany({});
+    deleted.slides_read = r5.count;
+
+    const r6 = await prisma.event.deleteMany({
+      where: { aggregateType: 'Slide' },
+    });
+    deleted.events_slide = r6.count;
+
+    request.log.info({ deleted }, 'dev-reset: slide data wiped');
+
+    return reply.send({ ok: true, deleted });
+  });
 }
