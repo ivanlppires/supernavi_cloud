@@ -18,6 +18,7 @@ import { annotationRoutes } from '../modules/annotations/routes.js';
 import { uiBridgeRoutes } from '../modules/ui-bridge/routes.js';
 import { pairingRoutes } from '../modules/pairing/routes.js';
 import { adminRoutes } from '../modules/admin/routes.js';
+import { edgeApiRoutes } from '../modules/edge-api/routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -117,6 +118,7 @@ async function buildServer() {
   await fastify.register(uiBridgeRoutes);
   await fastify.register(pairingRoutes);
   await fastify.register(adminRoutes);
+  await fastify.register(edgeApiRoutes);
 
   // Global error handler
   fastify.setErrorHandler((error: FastifyError, request, reply) => {
