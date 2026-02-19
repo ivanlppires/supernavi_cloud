@@ -6,7 +6,7 @@ export const slideInitSchema = z.object({
   width: z.number().int().nonnegative(),
   height: z.number().int().nonnegative(),
   mpp: z.number().nonnegative().optional(),
-  scanner: z.string().optional(),
+  scanner: z.string().nullable().optional(),
   tileSize: z.number().int().default(256),
   expectedTileCount: z.number().int().positive(),
   maxLevel: z.number().int().nonnegative(),
