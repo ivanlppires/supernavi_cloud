@@ -26,7 +26,7 @@ export async function edgeApiRoutes(fastify: FastifyInstance) {
   // Edge calls this before uploading tiles. Returns the S3 prefix to upload to.
   fastify.post('/edge/slides/init', {
     preHandler: authenticateEdgeKey,
-  }, async (request, reply) => {
+  }, async (request, _reply) => {
     const body = slideInitSchema.parse(request.body);
     const labId = (request as any).labId as string;
     const slideId = body.sha256;

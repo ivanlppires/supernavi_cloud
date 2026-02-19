@@ -109,7 +109,7 @@ export async function bindingsRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/api/v1/slides/ready',
     { preHandler: authenticateDevice },
-    async (request, reply) => {
+    async (_request, _reply) => {
       const slides = await prisma.slideRead.findMany({
         where: { cloudStatus: 'READY' },
         orderBy: { updatedAt: 'desc' },

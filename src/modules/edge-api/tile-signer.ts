@@ -61,7 +61,7 @@ export async function tileSignerRoutes(fastify: FastifyInstance) {
       const signedUrl = await getSignedUrlForKey(s3Key, config.SIGNED_URL_TTL_SECONDS);
 
       reply.header('Cache-Control', 'private, max-age=60');
-      return reply.redirect(302, signedUrl);
+      return reply.redirect(signedUrl);
     },
   );
 
@@ -80,7 +80,7 @@ export async function tileSignerRoutes(fastify: FastifyInstance) {
       const s3Key = `${slide.s3Prefix}thumb.jpg`;
       const signedUrl = await getSignedUrlForKey(s3Key, 300);
 
-      return reply.redirect(302, signedUrl);
+      return reply.redirect(signedUrl);
     },
   );
 }
