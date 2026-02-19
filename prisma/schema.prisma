@@ -7,6 +7,49 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Lab (tenant) for multi-tenant isolation
+model Lab {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  edgeKeys EdgeKey[]
+
+  @@map("labs")
+}
+
+/// Edge device authentication keys (one per edge agent)
+model EdgeKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  labId     String   @map("lab_id") @db.Uuid
+  name      String
+  keyHash   String   @map("key_hash") // SHA-256 hex of the raw key
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  lab Lab @relation(fields: [labId], references: [id], onDelete: Cascade)
+
+  @@index([keyHash])
+  @@index([labId])
+  @@map("edge_keys")
+}
+
+/// Bindings between PathoWeb cases and SuperNavi slides
+model CaseBinding {
+  id            String   @id @default(uuid()) @db.Uuid
+  labId         String   @map("lab_id") @db.Uuid
+  pathowebRef   String   @map("pathoweb_ref")
+  slideId       String   @map("slide_id")
+  boundByUserId String?  @map("bound_by_user_id") @db.Uuid
+  boundAt       DateTime @default(now()) @map("bound_at") @db.Timestamptz
+
+  @@unique([pathowebRef, slideId])
+  @@index([labId])
+  @@index([pathowebRef])
+  @@index([slideId])
+  @@map("case_bindings")
+}
+
 /// Event store - append-only log of all events from edge
 model Event {
   id            String   @id @default(uuid()) @db.Uuid
@@ -83,6 +126,11 @@ model SlideRead {
   externalSlideLabel String?   @map("external_slide_label")
   confirmedCaseLink  Boolean   @default(true) @map("confirmed_case_link")
   edgeId             String?   @map("edge_id")
+  labId              String?   @map("lab_id") @db.Uuid
+  cloudStatus        String    @default("UNKNOWN") @map("cloud_status") // UPLOADED | PROCESSING | READY | FAILED | UNKNOWN
+  dziUrl             String?   @map("dzi_url")
+  tileCount          Int?      @map("tile_count")
+  s3Prefix           String?   @map("s3_prefix")
   readyForReviewAt   DateTime? @map("ready_for_review_at") @db.Timestamptz
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   lastEventId        String?   @map("last_event_id")
@@ -96,6 +144,7 @@ model SlideRead {
   @@index([externalCaseId])
   @@index([externalCaseBase])
   @@index([edgeId])
+  @@index([labId, cloudStatus])
   @@map("slides_read")
 }
 
