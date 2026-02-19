@@ -19,6 +19,7 @@ import { uiBridgeRoutes } from '../modules/ui-bridge/routes.js';
 import { pairingRoutes } from '../modules/pairing/routes.js';
 import { adminRoutes } from '../modules/admin/routes.js';
 import { edgeApiRoutes } from '../modules/edge-api/routes.js';
+import { tileSignerRoutes } from '../modules/edge-api/tile-signer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -84,6 +85,7 @@ async function buildServer() {
              url === '/api/v1/tiles/proxy' ||
              url.startsWith('/edge/') ||
              url.startsWith('/preview/') ||
+             /^\/api\/v1\/tiles\//.test(url) ||
              /^\/api\/slides\/[^/]+\/tiles\//.test(url);
     },
   });
@@ -102,6 +104,7 @@ async function buildServer() {
                                url === '/api/v1/tiles/proxy' ||
                                url.startsWith('/edge/') ||
                                url.startsWith('/preview/') ||
+                               /^\/api\/v1\/tiles\//.test(url) ||
                                /^\/api\/slides\/[^/]+\/tiles\//.test(url);
       return !isHighThroughput;
     },
@@ -119,6 +122,7 @@ async function buildServer() {
   await fastify.register(pairingRoutes);
   await fastify.register(adminRoutes);
   await fastify.register(edgeApiRoutes);
+  await fastify.register(tileSignerRoutes);
 
   // Global error handler
   fastify.setErrorHandler((error: FastifyError, request, reply) => {
