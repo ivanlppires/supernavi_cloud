@@ -20,6 +20,7 @@ import { pairingRoutes } from '../modules/pairing/routes.js';
 import { adminRoutes } from '../modules/admin/routes.js';
 import { edgeApiRoutes } from '../modules/edge-api/routes.js';
 import { tileSignerRoutes } from '../modules/edge-api/tile-signer.js';
+import { bindingsRoutes } from '../modules/edge-api/bindings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -123,6 +124,7 @@ async function buildServer() {
   await fastify.register(adminRoutes);
   await fastify.register(edgeApiRoutes);
   await fastify.register(tileSignerRoutes);
+  await fastify.register(bindingsRoutes);
 
   // Global error handler
   fastify.setErrorHandler((error: FastifyError, request, reply) => {
