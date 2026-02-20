@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { authenticateEdgeKey } from './auth.js';
 import { slideInitSchema, slideReadySchema } from './schemas.js';
+import { extractTarArchive } from './tar-extractor.js';
 import { prisma } from '../../db/index.js';
 import config from '../../config/index.js';
 
@@ -41,6 +42,7 @@ export async function edgeApiRoutes(fastify: FastifyInstance) {
         s3Prefix: existing.s3Prefix,
         status: 'READY',
         alreadyReady: true,
+        supportedUploadModes: ['tar', 'individual'],
       };
     }
 
@@ -73,7 +75,7 @@ export async function edgeApiRoutes(fastify: FastifyInstance) {
       },
     });
 
-    return { slideId, labId, s3Prefix, status: 'PROCESSING' };
+    return { slideId, labId, s3Prefix, status: 'PROCESSING', supportedUploadModes: ['tar', 'individual'] };
   });
 
   // POST /edge/slides/:slideId/ready
@@ -94,7 +96,40 @@ export async function edgeApiRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'Slide does not belong to this lab' });
     }
 
-    // Verify tile_manifest.json exists in S3
+    // Tar archive mode: edge uploaded a single tar file, cloud extracts in background
+    if (body.archive && body.archiveKey) {
+      // Verify tar archive exists in S3
+      try {
+        await getS3().send(new HeadObjectCommand({
+          Bucket: config.S3_BUCKET,
+          Key: body.archiveKey,
+        }));
+      } catch {
+        return reply.code(409).send({
+          error: 'tiles.tar not found in S3',
+          archiveKey: body.archiveKey,
+        });
+      }
+
+      // Mark as EXTRACTING and start background extraction
+      await prisma.slideRead.update({
+        where: { slideId },
+        data: {
+          cloudStatus: 'EXTRACTING',
+          tileCount: body.tileCount,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Fire-and-forget: extract tiles in background
+      extractTarArchive(slideId, slide.s3Prefix!, body.archiveKey).catch(err => {
+        console.error(`[TAR-EXTRACT] Background extraction failed for ${slideId.substring(0, 12)}: ${err.message}`);
+      });
+
+      return { ok: true, status: 'EXTRACTING', slideId };
+    }
+
+    // Individual tile mode: verify manifest and tile count
     const manifestKey = `${slide.s3Prefix}tile_manifest.json`;
     try {
       await getS3().send(new HeadObjectCommand({
@@ -108,7 +143,6 @@ export async function edgeApiRoutes(fastify: FastifyInstance) {
       });
     }
 
-    // Verify tile count matches expected
     if (slide.tileCount && body.tileCount !== slide.tileCount) {
       return reply.code(409).send({
         error: `Tile count mismatch: expected ${slide.tileCount}, got ${body.tileCount}`,

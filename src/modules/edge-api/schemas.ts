@@ -15,4 +15,6 @@ export const slideInitSchema = z.object({
 export const slideReadySchema = z.object({
   tileCount: z.number().int().positive(),
   levelCounts: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  archive: z.boolean().optional(),
+  archiveKey: z.string().optional(),
 });
