@@ -110,18 +110,18 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         externalCaseId,
         readySlides: [],
         processingSlides: [],
-        unconfirmedCandidates: [],
         lastUpdated: null,
       });
     }
 
-    // Find confirmed slides for this case (by externalCaseBase OR by caseId)
-    const confirmedSlides = await prisma.slideRead.findMany({
+    // Find slides for this case automatically by filename, label, or case link
+    const matchedSlides = await prisma.slideRead.findMany({
       where: {
-        confirmedCaseLink: true,
         ...edgeWhere,
         OR: [
           { externalCaseBase: caseBase },
+          { svsFilename: { startsWith: caseBase, mode: 'insensitive' } },
+          { externalSlideLabel: { startsWith: caseBase, mode: 'insensitive' } },
           ...(internalCase ? [{ caseId: internalCase.caseId }] : []),
         ],
       },
@@ -131,7 +131,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       orderBy: { updatedAt: 'desc' },
     });
 
-    const readySlides = confirmedSlides
+    const readySlides = matchedSlides
       .filter(s => s.hasPreview)
       .map((s, i) => ({
         slideId: s.slideId,
@@ -143,7 +143,7 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         height: s.height,
       }));
 
-    const processingSlides = confirmedSlides
+    const processingSlides = matchedSlides
       .filter(s => !s.hasPreview)
       .map((s, i) => ({
         slideId: s.slideId,
@@ -152,42 +152,8 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
         index: readySlides.length + i + 1,
       }));
 
-    // Find unconfirmed candidates (recent slides without confirmed link)
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const recentUnlinked = await prisma.slideRead.findMany({
-      where: {
-        ...edgeWhere,
-        OR: [
-          { externalCaseBase: null },
-          { confirmedCaseLink: false },
-        ],
-        updatedAt: { gte: since },
-      },
-      take: 50,
-    });
-
-    const unconfirmedCandidates = recentUnlinked
-      .map(s => {
-        const score = calculateMatchScore(caseBase, {
-          externalCaseBase: s.externalCaseBase,
-          externalCaseId: s.externalCaseId,
-          svsFilename: s.svsFilename,
-        });
-        return {
-          slideId: s.slideId,
-          label: s.externalSlideLabel || s.svsFilename,
-          thumbUrl: s.hasPreview ? signThumb(s.slideId) : null,
-          score,
-          filename: s.svsFilename,
-          createdAt: s.updatedAt.toISOString(),
-        };
-      })
-      .filter(c => c.score >= 0.85)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
-
-    const lastUpdated = confirmedSlides.length > 0
-      ? confirmedSlides[0].updatedAt.toISOString()
+    const lastUpdated = matchedSlides.length > 0
+      ? matchedSlides[0].updatedAt.toISOString()
       : null;
 
     return reply.send({
@@ -195,7 +161,6 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       externalCaseId,
       readySlides,
       processingSlides,
-      unconfirmedCandidates,
       lastUpdated,
     });
   });
@@ -384,6 +349,13 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Slide not found' });
     }
 
+    // Tenant isolation: verify slide belongs to user's edges
+    const userId = getAuthUserId(request);
+    const allowedEdges = userId ? await getUserEdgeIds(userId) : null;
+    if (allowedEdges && slide.edgeId && !allowedEdges.includes(slide.edgeId)) {
+      return reply.status(404).send({ error: 'Slide not found' });
+    }
+
     await prisma.slideRead.update({
       where: { slideId },
       data: {
@@ -440,6 +412,13 @@ export async function uiBridgeRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     if (!slide) {
+      return reply.status(404).send({ error: 'Slide not found' });
+    }
+
+    // Tenant isolation: verify slide belongs to user's edges
+    const viewerUserId = getAuthUserId(request);
+    const viewerAllowedEdges = viewerUserId ? await getUserEdgeIds(viewerUserId) : null;
+    if (viewerAllowedEdges && slide.edgeId && !viewerAllowedEdges.includes(slide.edgeId)) {
       return reply.status(404).send({ error: 'Slide not found' });
     }
 

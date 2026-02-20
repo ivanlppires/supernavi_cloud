@@ -144,6 +144,7 @@ model SlideRead {
   @@index([externalCaseId])
   @@index([externalCaseBase])
   @@index([edgeId])
+  @@index([svsFilename])
   @@index([labId, cloudStatus])
   @@map("slides_read")
 }
