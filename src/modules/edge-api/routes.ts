@@ -98,6 +98,10 @@ export async function edgeApiRoutes(fastify: FastifyInstance) {
 
     // Tar archive mode: edge uploaded a single tar file, cloud extracts in background
     if (body.archive && body.archiveKey) {
+      if (!slide.s3Prefix) {
+        return reply.code(409).send({ error: 'Slide has no s3Prefix configured' });
+      }
+
       // Verify tar archive exists in S3
       try {
         await getS3().send(new HeadObjectCommand({
@@ -122,7 +126,7 @@ export async function edgeApiRoutes(fastify: FastifyInstance) {
       });
 
       // Fire-and-forget: extract tiles in background
-      extractTarArchive(slideId, slide.s3Prefix!, body.archiveKey).catch(err => {
+      extractTarArchive(slideId, slide.s3Prefix, body.archiveKey).catch(err => {
         console.error(`[TAR-EXTRACT] Background extraction failed for ${slideId.substring(0, 12)}: ${err.message}`);
       });
 

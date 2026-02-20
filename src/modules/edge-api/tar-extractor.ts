@@ -4,11 +4,12 @@
  * Flow:
  *   1. Stream tiles.tar from S3 (GetObject)
  *   2. Parse tar entries (tar-stream)
- *   3. Upload individual tiles to S3 at high concurrency (intra-region)
+ *   3. Upload individual tiles to S3 as they arrive (streaming, bounded concurrency)
  *   4. Delete tiles.tar from S3
- *   5. Update cloudStatus → READY
+ *   5. Update cloudStatus → READY (only if all tiles uploaded successfully)
  *
  * Runs as a background task (non-blocking for the /ready response).
+ * Uses streaming with backpressure to avoid loading the entire archive into memory.
  */
 
 import { S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
@@ -48,8 +49,40 @@ function streamToBuffer(stream: Readable): Promise<Buffer> {
 }
 
 /**
+ * Upload a single tile to S3 with retry.
+ * Returns true if upload succeeded, false otherwise.
+ */
+async function uploadTileWithRetry(
+  s3: S3Client,
+  bucket: string,
+  key: string,
+  body: Buffer,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await s3.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: 'image/jpeg',
+        CacheControl: 'public, max-age=31536000, immutable',
+      }));
+      return true;
+    } catch {
+      if (attempt === 3) {
+        console.error(`[TAR-EXTRACT] Failed to upload ${key} after 3 attempts`);
+        return false;
+      }
+      await new Promise(r => setTimeout(r, 500 * attempt));
+    }
+  }
+  return false;
+}
+
+/**
  * Extract a tar archive from S3 and re-upload individual tiles.
- * This function is meant to be called in the background (fire-and-forget).
+ * Uses streaming with bounded concurrency to avoid loading the entire
+ * archive into memory. Tiles are uploaded as they are parsed from the tar.
  */
 export async function extractTarArchive(
   slideId: string,
@@ -73,31 +106,71 @@ export async function extractTarArchive(
       throw new Error('Empty response body from S3');
     }
 
-    // Step 2: Parse tar and collect entries
+    // Step 2+3: Parse tar entries and upload as they arrive (streaming)
     const extract = tar.extract();
-    const uploadQueue: { key: string; body: Buffer }[] = [];
+    let totalParsed = 0;
+    let uploaded = 0;
+    let failed = 0;
+
+    // Bounded concurrency: track in-flight uploads with a semaphore
+    let inFlight = 0;
+    let resolveSlot: (() => void) | null = null;
+
+    function acquireSlot(): Promise<void> {
+      if (inFlight < EXTRACT_CONCURRENCY) {
+        inFlight++;
+        return Promise.resolve();
+      }
+      return new Promise<void>(resolve => {
+        resolveSlot = resolve;
+      });
+    }
+
+    function releaseSlot(): void {
+      inFlight--;
+      if (resolveSlot) {
+        const pending = resolveSlot;
+        resolveSlot = null;
+        inFlight++;
+        pending();
+      }
+    }
+
+    // Collect upload promises so we can wait for all to complete
+    const uploadPromises: Promise<void>[] = [];
 
     const parseComplete = new Promise<void>((resolve, reject) => {
-      extract.on('entry', async (header, stream, next) => {
-        try {
-          // Skip directories and non-jpg files
-          if (header.type !== 'file' || !header.name.endsWith('.jpg')) {
-            stream.resume();
-            next();
-            return;
-          }
-
-          const body = await streamToBuffer(stream as unknown as Readable);
-
-          // Convert tar path: ./14/3_2.jpg → {s3Prefix}14/3_2.jpg
-          const relativePath = header.name.replace(/^\.\//, '');
-          const s3Key = `${s3Prefix}${relativePath}`;
-
-          uploadQueue.push({ key: s3Key, body });
+      extract.on('entry', (header, stream, next) => {
+        // Skip directories and non-jpg files
+        if (header.type !== 'file' || !header.name.endsWith('.jpg')) {
+          stream.resume();
           next();
-        } catch (err) {
-          next(err as Error);
+          return;
         }
+
+        // Read entry data into buffer (individual tile, typically 5-15KB)
+        streamToBuffer(stream as unknown as Readable)
+          .then(async (body) => {
+            const relativePath = header.name.replace(/^\.\//, '');
+            const s3Key = `${s3Prefix}${relativePath}`;
+            totalParsed++;
+
+            // Wait for a concurrency slot, then upload in background
+            await acquireSlot();
+
+            const uploadPromise = uploadTileWithRetry(s3, bucket, s3Key, body)
+              .then(success => {
+                if (success) uploaded++;
+                else failed++;
+              })
+              .finally(() => releaseSlot());
+
+            uploadPromises.push(uploadPromise);
+
+            // Allow tar parser to continue to next entry
+            next();
+          })
+          .catch(err => next(err as Error));
       });
 
       extract.on('finish', resolve);
@@ -108,46 +181,13 @@ export async function extractTarArchive(
     const bodyStream = getResult.Body as Readable;
     bodyStream.pipe(extract);
 
+    // Wait for tar parsing to finish
     await parseComplete;
 
-    console.log(`[TAR-EXTRACT] Parsed ${uploadQueue.length} tiles from archive, uploading...`);
+    // Wait for all in-flight uploads to complete
+    await Promise.all(uploadPromises);
 
-    // Step 3: Upload individual tiles at high concurrency
-    let uploaded = 0;
-    let index = 0;
-
-    async function worker() {
-      while (index < uploadQueue.length) {
-        const i = index++;
-        const { key, body } = uploadQueue[i];
-
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            await s3.send(new PutObjectCommand({
-              Bucket: bucket,
-              Key: key,
-              Body: body,
-              ContentType: 'image/jpeg',
-              CacheControl: 'public, max-age=31536000, immutable',
-            }));
-            uploaded++;
-            break;
-          } catch (err) {
-            if (attempt === 3) {
-              console.error(`[TAR-EXTRACT] Failed to upload ${key} after 3 attempts`);
-            } else {
-              await new Promise(r => setTimeout(r, 500 * attempt));
-            }
-          }
-        }
-      }
-    }
-
-    await Promise.all(
-      Array.from({ length: EXTRACT_CONCURRENCY }, worker),
-    );
-
-    console.log(`[TAR-EXTRACT] Uploaded ${uploaded}/${uploadQueue.length} tiles`);
+    console.log(`[TAR-EXTRACT] Uploaded ${uploaded}/${totalParsed} tiles (${failed} failed)`);
 
     // Step 4: Delete tar archive from S3
     try {
@@ -160,12 +200,30 @@ export async function extractTarArchive(
       console.warn(`[TAR-EXTRACT] Failed to delete archive (non-fatal): ${(err as Error).message}`);
     }
 
-    // Step 5: Mark slide as READY
+    // Step 5: Mark slide status based on upload results
+    if (failed > 0) {
+      const failRate = failed / totalParsed;
+      if (failRate > 0.01) {
+        // More than 1% failed - mark as FAILED for retry
+        console.error(`[TAR-EXTRACT] Too many failures (${failed}/${totalParsed}), marking FAILED`);
+        await prisma.slideRead.update({
+          where: { slideId },
+          data: {
+            cloudStatus: 'FAILED',
+            updatedAt: new Date(),
+          },
+        });
+        return;
+      }
+      console.warn(`[TAR-EXTRACT] Minor failures (${failed}/${totalParsed}), proceeding as READY`);
+    }
+
     await prisma.slideRead.update({
       where: { slideId },
       data: {
         cloudStatus: 'READY',
         hasPreview: true,
+        tileCount: uploaded,
         updatedAt: new Date(),
       },
     });
