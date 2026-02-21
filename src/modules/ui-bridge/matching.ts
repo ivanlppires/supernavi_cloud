@@ -56,8 +56,8 @@ export function calculateMatchScore(
   // 0.95: filename starts with the full case base
   if (normalizedFilename.startsWith(normalizedQuery)) return 0.95;
 
-  // 0.92: digit-only match (strip AP prefix)
-  const queryDigits = normalizedQuery.replace(/^AP/, '');
+  // 0.92: digit-only match (strip AP/PA prefix)
+  const queryDigits = normalizedQuery.replace(/^(?:AP|PA)/, '');
   if (queryDigits.length >= 6) {
     const filenameDigitsOnly = normalizedFilename.replace(/[^0-9]/g, '');
     if (filenameDigitsOnly.startsWith(queryDigits)) return 0.92;

@@ -7,11 +7,12 @@ import type { PrismaClient } from '@prisma/client';
 
 /**
  * Normalize case input.
- * Accepts "AP26000230", "pathoweb:AP26000230", or "pathoweb:ap26000230".
+ * Accepts "AP26000230", "PA26000230", "pathoweb:AP26000230", or "pathoweb:pa26000230".
+ * PA (Patologia Anatômica) is normalized to AP (Anatomopatológico).
  * Returns raw caseBase (e.g. "AP26000230").
  */
 export function normalizeCaseBase(input: string): string {
-  return input.replace(/^pathoweb:/i, '').toUpperCase();
+  return input.replace(/^pathoweb:/i, '').toUpperCase().replace(/^PA/, 'AP');
 }
 
 /**
