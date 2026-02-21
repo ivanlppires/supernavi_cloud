@@ -224,6 +224,23 @@ async function projectPreviewPublished(
   // Use the actual slide ID for preview asset
   const actualSlideId = existingSlide.slideId;
 
+  // Check if this event would downgrade full tiles to rebased preview tiles.
+  // This happens when tar-extractor already set maxPreviewLevel to the full level
+  // but a rebased preview:published event arrives later via sync and overwrites it.
+  const existingPreview = await tx.previewAsset.findUnique({
+    where: { slideId: actualSlideId },
+  });
+
+  if (existingPreview && existingPreview.maxPreviewLevel > payload.max_preview_level) {
+    logger?.info({
+      event_id: event.event_id,
+      slide_id: payload.slide_id,
+      existing_max_level: existingPreview.maxPreviewLevel,
+      new_max_level: payload.max_preview_level,
+    }, 'PreviewPublished: skipping update - would downgrade maxPreviewLevel (full tiles already set)');
+    return { success: true };
+  }
+
   // Upsert preview asset with normalized tiles prefix
   await tx.previewAsset.upsert({
     where: { slideId: actualSlideId },
