@@ -218,6 +218,31 @@ export async function extractTarArchive(
       console.warn(`[TAR-EXTRACT] Minor failures (${failed}/${totalParsed}), proceeding as READY`);
     }
 
+    // Fetch slide dimensions for manifest + previewAsset
+    const slide = await prisma.slideRead.findUniqueOrThrow({ where: { slideId } });
+    const maxLevel = Math.ceil(Math.log2(Math.max(slide.width, slide.height)));
+
+    // Upload full-res manifest.json to S3
+    const manifest = {
+      protocol: 'dzi',
+      tileSize: 256,
+      overlap: 0,
+      format: 'jpg',
+      width: slide.width,
+      height: slide.height,
+      levelMin: 0,
+      levelMax: maxLevel,
+      onDemand: false,
+    };
+    const manifestKey = `${s3Prefix}manifest.json`;
+    await s3.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: manifestKey,
+      Body: JSON.stringify(manifest),
+      ContentType: 'application/json',
+      CacheControl: 'public, max-age=31536000, immutable',
+    }));
+
     await prisma.slideRead.update({
       where: { slideId },
       data: {
@@ -227,6 +252,42 @@ export async function extractTarArchive(
         updatedAt: new Date(),
       },
     });
+
+    // Upsert previewAsset to point to full-res tiles
+    const thumbKey = `${s3Prefix}thumb.jpg`;
+    await prisma.previewAsset.upsert({
+      where: { slideId },
+      create: {
+        slideId,
+        caseId: slide.caseId,
+        lowTilesPrefix: s3Prefix,
+        maxPreviewLevel: maxLevel,
+        manifestKey,
+        thumbKey,
+        previewWidth: slide.width,
+        previewHeight: slide.height,
+        wasabiBucket: config.S3_BUCKET,
+        wasabiRegion: config.S3_REGION,
+        wasabiEndpoint: config.S3_ENDPOINT,
+        wasabiPrefix: s3Prefix,
+        tileSize: 256,
+        format: 'jpg',
+      },
+      update: {
+        lowTilesPrefix: s3Prefix,
+        maxPreviewLevel: maxLevel,
+        manifestKey,
+        thumbKey,
+        previewWidth: slide.width,
+        previewHeight: slide.height,
+        wasabiBucket: config.S3_BUCKET,
+        wasabiRegion: config.S3_REGION,
+        wasabiEndpoint: config.S3_ENDPOINT,
+        wasabiPrefix: s3Prefix,
+      },
+    });
+
+    console.log(`[TAR-EXTRACT] Updated previewAsset: maxLevel=${maxLevel}, prefix=${s3Prefix}`);
 
     const elapsed = Date.now() - startTime;
     console.log(`[TAR-EXTRACT] Complete for ${slideId.substring(0, 12)}: ${uploaded} tiles in ${(elapsed / 1000).toFixed(1)}s`);
